@@ -20,7 +20,7 @@ SHEET_ID = "1YvPF_yVecYhjFAwL8IuKAlgUv_cBJXMM4A_Xsv3s3iE"
 ADMIN_ID = "665932047"  # Telegram ID админа
 
 # Загрузка JSON-ключей из переменной окружения
-google_creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+google_creds_json = json.loads(os.getenv("JSON_KEYFILE"))
 
 # Авторизация в Google Sheets через JSON-ключи
 scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
