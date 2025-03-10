@@ -1,10 +1,7 @@
 ﻿import logging
 import asyncio
 import gspread
-import os
-import json
 from google.oauth2.service_account import Credentials
-from oauth2client.service_account import ServiceAccountCredentials
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message, BotCommand, BotCommandScopeChat, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
@@ -16,20 +13,17 @@ from datetime import datetime
 # 🔹 Настройки бота и таблицы
 # ==========================
 
-TOKEN = os.getenv("TOKEN")  # Загружаем токен из переменной окружения
+TOKEN = "7537026112:AAEWPikFWldtFWKeyer7_iiH793rWApLc2U"  # Укажи свой токен прямо в коде или загрузи из переменной окружения
 SHEET_ID = "1YvPF_yVecYhjFAwL8IuKAlgUv_cBJXMM4A_Xsv3s3iE"
 ADMIN_ID = "665932047"  # Telegram ID админа
 
-# Загружаем JSON-ключ из переменной окружения
-google_creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+# Указываем путь к JSON-файлу с ключами
+JSON_KEYFILE = "tlcbot-452706-b32f93bd688d.json"
 
-# Авторизуемся в Google API без файла JSON
-credentials = ServiceAccountCredentials.from_json_keyfile_dict(
-    google_creds_json, 
-    ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-)
+# Авторизация в Google Sheets через JSON-файл
+scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+credentials = Credentials.from_service_account_file(JSON_KEYFILE, scopes=scope)
 gc = gspread.authorize(credentials)
-
 
 # Подключение к Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
