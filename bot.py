@@ -341,7 +341,7 @@ async def track_deletion_handler(message: Message, state: FSMContext):
     await state.clear()
 
 # ✅ /contact_manager – связь с менеджером
-@router.message(lambda message: message.text and "менеджер" in message.text.lower())
+@router.message(F.text.in_(["📞 Связаться с менеджером", "/contact_manager"]))
 async def contact_manager_handler(message: Message):
     logging.info(f"🔘 Кнопка 'Связаться с менеджером' нажата пользователем {message.from_user.id}")
 
