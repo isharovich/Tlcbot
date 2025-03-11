@@ -151,7 +151,7 @@ async def register_city_handler(message: Message, state: FSMContext):
 async def register_phone_handler(message: Message, state: FSMContext):
     await state.update_data(phone=message.text.strip())
     await state.set_state(Registration.manager_code)
-    await message.answer("🏷 Введите **код менеджера** (его дал вам менеджер):")
+    await message.answer("🏷 Введите **Индивидуальный код** (его дал вам менеджер):")
 
 @router.message(Registration.manager_code)
 async def register_manager_handler(message: Message, state: FSMContext):
@@ -341,7 +341,24 @@ async def track_deletion_handler(message: Message, state: FSMContext):
 # ✅ /contact_manager – связь с менеджером
 @router.message(F.text == "📞 Связаться с менеджером")
 async def contact_manager_handler(message: Message):
-    await message.answer(get_text("contact_manager"), parse_mode="Markdown")
+    logging.info(f"🔘 Кнопка 'Связаться с менеджером' нажата пользователем {message.from_user.id}")
+
+    try:
+        # Проверяем, загружен ли текст из Google Sheets
+        text = get_text("contact_manager")
+
+        if "⚠️" in text:
+            raise ValueError("❌ Ошибка: текст не найден в Google Sheets!")
+
+        await message.answer(text, parse_mode="Markdown")
+
+    except Exception as e:
+        logging.error(f"❌ Ошибка при отправке сообщения: {e}")
+        # Если что-то пошло не так, отправляем ссылку напрямую
+        await message.answer(
+            "📞 Свяжитесь с менеджером через [WhatsApp](https://wa.me/77028888252)",
+            parse_mode="Markdown"
+        )
 
 
 # ✅ /push – массовая рассылка (только для админа)
