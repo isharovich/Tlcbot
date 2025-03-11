@@ -17,7 +17,7 @@ import json
 
 TOKEN = "7537026112:AAEWPikFWldtFWKeyer7_iiH793rWApLc2U"  # Укажи свой токен прямо в коде или загрузи из переменной окружения
 SHEET_ID = "1YvPF_yVecYhjFAwL8IuKAlgUv_cBJXMM4A_Xsv3s3iE"
-ADMIN_ID = "665932047"  # Telegram ID админа
+ADMIN_IDS = ["665932047", "473541446"]  # Telegram ID админа
 
 # Загрузка JSON-ключей из переменной окружения
 google_creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
@@ -112,8 +112,12 @@ ADMIN_COMMANDS = USER_COMMANDS + [
 ]
 
 async def set_bot_commands():
+
     await bot.set_my_commands(USER_COMMANDS)
-    await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=ADMIN_ID))
+
+    for admin_id in ADMIN_IDS:
+
+        await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=admin_id))
 
 # ==========================
 # 🔹 Обработчики команд
@@ -360,7 +364,7 @@ class PushNotification(StatesGroup):
 
 @router.message(F.text == "/push")
 async def start_push_handler(message: Message, state: FSMContext):
-    if str(message.from_user.id) != ADMIN_ID:
+    if str(message.from_user.id) not in ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
 
@@ -387,7 +391,7 @@ async def send_push_handler(message: Message, state: FSMContext):
 
 @router.message(F.text == "/check_issued")
 async def check_issued_handler(message: Message):
-    if str(message.from_user.id) != ADMIN_ID:
+    if str(message.from_user.id) not in ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
 
@@ -432,7 +436,7 @@ async def check_issued_handler(message: Message):
 
 @router.message(F.text == "/check_china")
 async def check_china_handler(message: Message):
-    if str(message.from_user.id) != ADMIN_ID:
+    if str(message.from_user.id) not in ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
 
@@ -481,7 +485,7 @@ async def check_china_handler(message: Message):
 
 @router.message(F.text == "/check_kz")
 async def check_kz_handler(message: Message):
-    if str(message.from_user.id) != ADMIN_ID:
+    if str(message.from_user.id) not in ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
 
@@ -578,7 +582,7 @@ async def add_tracking_handler(message: Message, state: FSMContext):
 # ✅ /update_texts – обновление текстов из Google Sheets (только для админа)
 @router.message(F.text == "/update_texts")
 async def update_texts_handler(message: Message):
-    if str(message.from_user.id) != ADMIN_ID:
+    if str(message.from_user.id) not in ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
 
