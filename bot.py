@@ -86,10 +86,12 @@ dp.include_router(router)
 user_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📦 Проверить статус посылок"), KeyboardButton(text="🖊 Подписать трек-номер")],
-        [KeyboardButton(text="❌ Удалить трек-номер"), KeyboardButton(text="📞 Связаться с менеджером")]
+        [KeyboardButton(text="❌ Удалить трек-номер"), KeyboardButton(text="📞 Связаться с менеджером")],
     ],
-    resize_keyboard=True
+    resize_keyboard=True,
+    one_time_keyboard=False  # Клавиатура остаётся на экране
 )
+
 
 # ==========================
 # 🔹 Команды бота
@@ -339,26 +341,15 @@ async def track_deletion_handler(message: Message, state: FSMContext):
     await state.clear()
 
 # ✅ /contact_manager – связь с менеджером
-@router.message(F.text == "📞 Связаться с менеджером")
+@router.message(lambda message: message.text and "менеджер" in message.text.lower())
 async def contact_manager_handler(message: Message):
     logging.info(f"🔘 Кнопка 'Связаться с менеджером' нажата пользователем {message.from_user.id}")
 
-    try:
-        # Проверяем, загружен ли текст из Google Sheets
-        text = get_text("contact_manager")
+    whatsapp_link = "https://wa.me/77028888252"
+    text = f"📞 Свяжитесь с менеджером через [WhatsApp]({whatsapp_link})"
 
-        if "⚠️" in text:
-            raise ValueError("❌ Ошибка: текст не найден в Google Sheets!")
+    await message.answer(text, parse_mode="Markdown", disable_web_page_preview=True)
 
-        await message.answer(text, parse_mode="Markdown")
-
-    except Exception as e:
-        logging.error(f"❌ Ошибка при отправке сообщения: {e}")
-        # Если что-то пошло не так, отправляем ссылку напрямую
-        await message.answer(
-            "📞 Свяжитесь с менеджером через [WhatsApp](https://wa.me/77028888252)",
-            parse_mode="Markdown"
-        )
 
 
 # ✅ /push – массовая рассылка (только для админа)
