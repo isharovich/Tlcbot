@@ -395,20 +395,30 @@ async def check_issued_handler(message: Message):
             continue
 
         if len(issued_row) > 1 and issued_row[1] == "✅":
-            break
+            break  # Если уже помечено, пропускаем
 
-        date = issued_row[2] if len(issued_row) > 2 else None  # Берём дату, если есть
+        user_id = None
+        manager_code = None
+        signature = None
 
-        found = False
-        for j, track_row in enumerate(tracking_records[1:], start=2):
+        # Ищем владельца трека в "Трекинг"
+        for j, track_row in enumerate(tracking_records[1:], start=2):  # Пропускаем заголовок
             if issued_track == track_row[0].strip().lower():
-                tracking_sheet.update_cell(j, 2, "Выдано")  # Меняем статус
-                found = True
-                break
+                user_id = track_row[4]  # ID Telegram клиента
+                manager_code = track_row[2]  # Код менеджера
+                signature = track_row[3]  # Подпись
 
-        if found:
-            issued_sheet.update_cell(i + 1, 2, "✅")
-            updated_count += 1
+                # Обновляем "Код менеджера", "Подпись" и "ID Телеграма" в "Выданное"
+                issued_sheet.update(f"D{i + 1}", [[manager_code]])  # Код менеджера
+                issued_sheet.update(f"E{i + 1}", [[signature]])  # Подпись
+                issued_sheet.update(f"F{i + 1}", [[user_id]])  # ID Телеграма
+
+                # Меняем статус в "Трекинг" на "Выдано"
+                tracking_sheet.update_cell(j, 2, "Выдано")
+
+                issued_sheet.update_cell(i + 1, 2, "✅")  # Помечаем, что статус обновлён
+                updated_count += 1
+                break  # Нашли – обновили – выходим
 
     await message.answer(f"✅ Обновлено {updated_count} треков. Теперь они отображаются как 'Выдано'.")
 
@@ -433,21 +443,33 @@ async def check_china_handler(message: Message):
             break
 
         user_id = None
+        manager_code = None
+        signature = None
         date = china_row[2] if len(china_row) > 2 else None  # Берём дату, если есть
 
+        # Ищем владельца трека в "Трекинг"
         for track_row in tracking_records[1:]:
             if china_track == track_row[0].strip().lower():
                 user_id = track_row[4]  # ID Telegram клиента
+                manager_code = track_row[2]  # Код менеджера
+                signature = track_row[3]  # Подпись
                 break
 
         if user_id:
             date_text = f" ({date})" if date else ""
             message_text = get_text("china_notification", track=china_track.upper()) + date_text
             await bot.send_message(user_id, message_text)
-            china_sheet.update_cell(i + 1, 2, "✅")
+
+            # ✅ Заполняем "Код менеджера", "Подпись" и "ID Телеграма"
+            china_sheet.update(f"D{i + 1}", [[manager_code]])  # Код менеджера
+            china_sheet.update(f"E{i + 1}", [[signature]])  # Подпись
+            china_sheet.update(f"F{i + 1}", [[user_id]])  # ID Телеграма
+
+            china_sheet.update_cell(i + 1, 2, "✅")  # Помечаем, что уведомление отправлено
             found += 1
 
-    await message.answer(f"✅ Отправлено {found} уведомлений!")
+    await message.answer(f"✅ Отправлено {found} уведомлений! Заполнены столбцы.")
+
 
 @router.message(F.text == "/check_kz")
 async def check_kz_handler(message: Message):
@@ -470,21 +492,31 @@ async def check_kz_handler(message: Message):
             break
 
         user_id = None
+        manager_code = None
+        signature = None
         date = kz_row[2] if len(kz_row) > 2 else None  # Берём дату, если есть
 
         for track_row in tracking_records[1:]:
             if kz_track == track_row[0].strip().lower():
                 user_id = track_row[4]  # ID Telegram клиента
+                manager_code = track_row[2]  # Код менеджера
+                signature = track_row[3]  # Подпись
                 break
 
         if user_id:
             date_text = f" ({date})" if date else ""
             message_text = get_text("kz_notification", track=kz_track.upper()) + date_text
             await bot.send_message(user_id, message_text)
+
+            # ✅ Заполняем "Код менеджера", "Подпись" и "ID Телеграма"
+            kz_sheet.update(f"D{i + 1}", [[manager_code]])  # Код менеджера
+            kz_sheet.update(f"E{i + 1}", [[signature]])  # Подпись
+            kz_sheet.update(f"F{i + 1}", [[user_id]])  # ID Телеграма
+
             kz_sheet.update_cell(i + 1, 2, "✅")
             found += 1
 
-    await message.answer(f"✅ Отправлено {found} уведомлений!")
+    await message.answer(f"✅ Отправлено {found} уведомлений! Заполнены столбцы.")
 
 
 # ==========================
@@ -518,13 +550,8 @@ async def add_tracking_handler(message: Message, state: FSMContext):
 
     logging.info(f"✅ Начинаю добавлять трек в Tracking: {track_number}")
 
-    # Добавляем в "Трекинг"
+    # Добавляем в "Трекинг" (НО НЕ В КИТАЙ/КАЗАХСТАН/ВЫДАННОЕ!)
     tracking_sheet.append_row([track_number, current_date, manager_code, "", user_id], value_input_option="USER_ENTERED")
-
-    # Дублируем в другие таблицы
-    for sheet in [china_sheet, kz_sheet, issued_sheet]:
-        sheet.append_row([track_number, "", current_date, manager_code, "", user_id], value_input_option="USER_ENTERED")
-        logging.info(f"✅ Данные добавлены в {sheet.title}: {track_number} -> Код менеджера: {manager_code}, ID: {user_id}")
 
     logging.info(f"✅ Отправляю подтверждение пользователю: {track_number}")
 
