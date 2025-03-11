@@ -528,13 +528,23 @@ async def check_kz_handler(message: Message):
     "/sign_track", "/delete_track", "/contact_manager"
 ])
 async def add_tracking_handler(message: Message, state: FSMContext):
-    track_number = message.text.strip().upper()
+    user_input = " ".join(message.text.split())  # Убираем лишние пробелы
     user_id = str(message.from_user.id)
 
-    logging.info(f"📦 Получен трек-номер: {track_number} от {user_id}")
+    logging.info(f"📦 Получен ввод: {user_input} от {user_id}")
 
-    if len(track_number) < 5:
-        await message.answer("❌ Некорректный трек-номер. Попробуйте ещё раз.")
+    if not user_input:
+        await message.answer("❌ Вы не ввели трек-номер. Попробуйте ещё раз.")
+        return
+
+    # Разделяем ввод: первый элемент — трек, остальное — подпись
+    parts = user_input.split(" ", 1)
+    track_number = parts[0].upper()  # Первый элемент — трек-номер
+    signature = parts[1] if len(parts) > 1 else ""  # Остальное — подпись (если есть)
+
+    # Проверка длины трек-номера
+    if not (8 <= len(track_number) <= 20):
+        await message.answer("❌ Трек-номер должен содержать от 8 до 20 символов. Попробуйте ещё раз.")
         return
 
     # Проверяем, зарегистрирован ли пользователь
@@ -548,14 +558,12 @@ async def add_tracking_handler(message: Message, state: FSMContext):
     manager_code = users_sheet.cell(row_index, 5).value  # Код менеджера находится в 5-м столбце
     current_date = datetime.now().strftime("%Y-%m-%d")
 
-    logging.info(f"✅ Начинаю добавлять трек в Tracking: {track_number}")
+    logging.info(f"✅ Добавляю трек в Tracking: {track_number}, Подпись: {signature}")
 
-    # Добавляем в "Трекинг" (НО НЕ В КИТАЙ/КАЗАХСТАН/ВЫДАННОЕ!)
-    tracking_sheet.append_row([track_number, current_date, manager_code, "", user_id], value_input_option="USER_ENTERED")
+    # Добавляем в "Трекинг"
+    tracking_sheet.append_row([track_number, current_date, manager_code, signature, user_id], value_input_option="USER_ENTERED")
 
-    logging.info(f"✅ Отправляю подтверждение пользователю: {track_number}")
-
-    await message.answer(get_text("track_saved", track=track_number))
+    await message.answer(f"✅ Трек-номер {track_number} сохранён{' с подписью: ' + signature if signature else ''}.")
 
 
 
