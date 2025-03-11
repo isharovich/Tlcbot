@@ -516,21 +516,20 @@ async def add_tracking_handler(message: Message, state: FSMContext):
     manager_code = users_sheet.cell(row_index, 5).value  # Код менеджера находится в 5-м столбце
     current_date = datetime.now().strftime("%Y-%m-%d")
 
-    # 📌 Теперь сохраняем:
-    # 1-й столбец = Трек-номер
-    # 2-й столбец = Дата добавления
-    # 3-й столбец = Код менеджера
-    # 4-й столбец = Подпись (изначально пустая)
-    # 5-й столбец = Telegram ID клиента
+    logging.info(f"✅ Начинаю добавлять трек в Tracking: {track_number}")
+
+    # Добавляем в "Трекинг"
     tracking_sheet.append_row([track_number, current_date, manager_code, "", user_id], value_input_option="USER_ENTERED")
 
-    # Дублируем данные в другие таблицы
+    # Дублируем в другие таблицы
     for sheet in [china_sheet, kz_sheet, issued_sheet]:
         sheet.append_row([track_number, "", current_date, manager_code, "", user_id], value_input_option="USER_ENTERED")
         logging.info(f"✅ Данные добавлены в {sheet.title}: {track_number} -> Код менеджера: {manager_code}, ID: {user_id}")
 
-    # ✅ `await` теперь внутри функции
+    logging.info(f"✅ Отправляю подтверждение пользователю: {track_number}")
+
     await message.answer(get_text("track_saved", track=track_number))
+
 
 
 # ✅ /update_texts – обновление текстов из Google Sheets (только для админа)
