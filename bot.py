@@ -546,7 +546,7 @@ async def main():
     logging.basicConfig(level=logging.INFO)
     load_texts()  # Загружаем тексты из Google Sheets
     await set_bot_commands()  # Устанавливаем команды
-    await bot.delete_webhook(drop_pending_updates=True)
+    await bot.delete_webhook(drop_pending_updates=True)  # Очищаем Webhook перед Polling
     await dp.start_polling(bot)  # Запускаем бота
 
 if __name__ == "__main__":
