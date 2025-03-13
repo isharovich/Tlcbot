@@ -27,13 +27,8 @@ scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis
 credentials = Credentials.from_service_account_info(google_creds_json, scopes=scope)
 gc = gspread.authorize(credentials)
 
-
 # Подключение к Google Sheets
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-google_creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
-creds = Credentials.from_service_account_info(google_creds_json, scopes=scope)
-gclient = gspread.authorize(creds)
-spreadsheet = gclient.open_by_key(SHEET_ID)
+spreadsheet = gc.open_by_key(SHEET_ID)
 
 # Получаем листы
 users_sheet = spreadsheet.worksheet("Пользователи")
