@@ -16,7 +16,7 @@ import json
 # ==========================
 
 TOKEN = "7537026112:AAEWPikFWldtFWKeyer7_iiH793rWApLc2U"  # Укажи свой токен прямо в коде или загрузи из переменной окружения
-SHEET_ID = "1YvPF_yVecYhjFAwL8IuKAlgUv_cBJXMM4A_Xsv3s3iE"
+SHEET_ID = "1QaR920L5bZUGNLk02M-lgXr9c5_nHJQVoPgPL7UVVY4"
 ADMIN_IDS = ["665932047", "473541446"]  # Telegram ID админа
 
 # Загрузка JSON-ключей из переменной окружения
