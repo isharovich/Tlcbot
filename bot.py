@@ -8,6 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
 from datetime import datetime
+from aiogram import Router, F
 import os
 import json
 
@@ -224,14 +225,15 @@ class TrackSigning(StatesGroup):
     selecting_track = State()
     entering_signature = State()
 
-# ✅ /sign_track – подписать трек
+# ✅ Подписать трек-номер
 @router.message(F.text.in_(["🖊 Подписать трек-номер", "/sign_track"]))
 async def sign_track_handler(message: Message, state: FSMContext):
+    """ Запуск процесса подписания трека """
+    await state.clear()  # Очищаем прошлые состояния
     user_id = str(message.from_user.id)
 
-    # Ищем все трек-номера, принадлежащие пользователю (по Telegram ID)
-    user_tracks = [row[0] for row in tracking_sheet.get_all_values()
-                   if len(row) > 4 and row[4] == user_id]
+    # Получаем треки пользователя
+    user_tracks = [row[0] for row in tracking_sheet.get_all_values() if len(row) > 4 and row[4] == user_id]
 
     if not user_tracks:
         await message.answer("📭 У вас нет активных трек-номеров.")
@@ -248,16 +250,23 @@ async def sign_track_handler(message: Message, state: FSMContext):
 
 @router.message(TrackManagement.selecting_track)
 async def track_selected_handler(message: Message, state: FSMContext):
+    """ Обработчик выбора трека """
     selected_track = message.text.strip().upper()
     await state.update_data(selected_track=selected_track)
     await state.set_state(TrackManagement.adding_signature)
-    await message.answer("✏️ Введите подпись для этого трек-номера:")
+    await message.answer("✏️ Введите подпись для этого трек-номера:", reply_markup=ReplyKeyboardRemove())
 
 @router.message(TrackManagement.adding_signature)
 async def track_signature_handler(message: Message, state: FSMContext):
+    """ Обработчик подписи трека """
     data = await state.get_data()
-    selected_track = data["selected_track"]
+    selected_track = data.get("selected_track")
     signature = message.text.strip()
+
+    if not selected_track:
+        await message.answer("❌ Ошибка! Сначала выберите трек-номер.")
+        await state.clear()
+        return
 
     records = tracking_sheet.get_all_values()
     for i, row in enumerate(records):
@@ -270,45 +279,14 @@ async def track_signature_handler(message: Message, state: FSMContext):
     await message.answer("❌ Не удалось найти трек-номер.")
     await state.clear()
 
-
-
-
-@router.message(TrackManagement.selecting_track)
-async def track_selected_handler(message: Message, state: FSMContext):
-    await state.update_data(selected_track=message.text.strip())
-    await message.answer("✏️ Введите подпись для этого трек-номера:")
-    await state.set_state(TrackManagement.adding_signature)
-
-@router.message(TrackManagement.adding_signature)
-async def track_signature_handler(message: Message, state: FSMContext):
-    data = await state.get_data()
-    selected_track = data["selected_track"]
-    signature = message.text.strip()
-
-    records = tracking_sheet.get_all_values()
-    for i, row in enumerate(records):
-        if row[0] == selected_track and row[2] == str(message.from_user.id):
-            tracking_sheet.update_cell(i + 1, 4, signature)
-            await message.answer(f"✅ Подпись добавлена к {selected_track}: {signature}")
-            await state.clear()
-            return
-
-    await message.answer("❌ Не удалось найти трек-номер.")
-    await state.clear()
-
-
-# ✅ /delete_track – удалить трек
-# Определяем состояние FSM для удаления
-class TrackDeletion(StatesGroup):
-    selecting_track = State()
-
+# ✅ Удалить трек-номер
 @router.message(F.text.in_(["❌ Удалить трек-номер", "/delete_track"]))
 async def delete_track_handler(message: Message, state: FSMContext):
+    """ Запуск процесса удаления трека """
+    await state.clear()  # Очищаем прошлые состояния
     user_id = str(message.from_user.id)
 
-    # Ищем все трек-номера, принадлежащие пользователю (по Telegram ID)
-    user_tracks = [row[0] for row in tracking_sheet.get_all_values()
-                   if len(row) > 4 and row[4] == user_id]
+    user_tracks = [row[0] for row in tracking_sheet.get_all_values() if len(row) > 4 and row[4] == user_id]
 
     if not user_tracks:
         await message.answer("📭 У вас нет активных трек-номеров.")
@@ -320,11 +298,12 @@ async def delete_track_handler(message: Message, state: FSMContext):
         one_time_keyboard=True
     )
 
-    await state.set_state(TrackDeletion.selecting_track)
+    await state.set_state(TrackManagement.deleting_track)
     await message.answer("❌ Выберите трек-номер, который хотите удалить:", reply_markup=keyboard)
 
-@router.message(TrackDeletion.selecting_track)
+@router.message(TrackManagement.deleting_track)
 async def track_deletion_handler(message: Message, state: FSMContext):
+    """ Обработчик удаления трека """
     track_number = message.text.strip().upper()
     user_id = str(message.from_user.id)
 
