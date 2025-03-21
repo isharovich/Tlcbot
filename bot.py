@@ -97,6 +97,7 @@ USER_COMMANDS = [
     BotCommand(command="sign_track", description="🖊 Подписать трек-номер"),
     BotCommand(command="delete_track", description="❌ Удалить трек-номер"),
     BotCommand(command="contact_manager", description="📞 Связаться с менеджером")
+    BotCommand(command="отмена", description="❌ Отменить текущее действие"),
 ]
 
 ADMIN_COMMANDS = USER_COMMANDS + [
@@ -133,9 +134,11 @@ async def register_handler(message: Message, state: FSMContext):
     if user_id in existing:
         await message.answer("✅ Вы уже зарегистрированы! Можете отправлять трек-номера.")
         return
+    await state.clear()  # Очистка всех прошлых состояний
     await state.update_data(user_id=user_id)
     await state.set_state(Registration.name)
-    await message.answer("📌 Введите ваше **имя**:")
+    await asyncio.sleep(0.1)  # Даем FSM зафиксироваться
+    await message.answer("📌 Введите ваше **имя** (или введите /отмена):")
 
 @router.message(Registration.name)
 async def register_name_handler(message: Message, state: FSMContext):
@@ -246,7 +249,9 @@ async def sign_track_handler(message: Message, state: FSMContext):
     )
 
     await state.set_state(TrackManagement.selecting_track)
+    await asyncio.sleep(0.1)  # Даём FSM зафиксироваться
     await message.answer("✏️ Выберите трек-номер, который хотите подписать:", reply_markup=keyboard)
+
 
 @router.message(TrackManagement.selecting_track)
 async def track_selected_handler(message: Message, state: FSMContext):
@@ -299,7 +304,9 @@ async def delete_track_handler(message: Message, state: FSMContext):
     )
 
     await state.set_state(TrackManagement.deleting_track)
+    await asyncio.sleep(0.1)  # Даём FSM зафиксироваться
     await message.answer("❌ Выберите трек-номер, который хотите удалить:", reply_markup=keyboard)
+
 
 @router.message(TrackManagement.deleting_track)
 async def track_deletion_handler(message: Message, state: FSMContext):
@@ -503,6 +510,12 @@ async def check_kz_handler(message: Message):
             found += 1
 
     await message.answer(f"✅ Отправлено {found} уведомлений! Заполнены столбцы.")
+    
+@router.message(F.text == "/отмена")
+async def cancel_handler(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("❌ Действие отменено. Вы можете продолжить работу.", reply_markup=user_keyboard)
+
 
 
 # ==========================
@@ -514,6 +527,26 @@ async def check_kz_handler(message: Message):
     "/sign_track", "/delete_track", "/contact_manager"
 ])
 async def add_tracking_handler(message: Message, state: FSMContext):
+    # 🔒 Проверка: если пользователь в процессе регистрации — не даём добавить трек
+    current_state = await state.get_state()
+    if current_state in [
+        Registration.name.state,
+        Registration.city.state,
+        Registration.phone.state,
+        Registration.manager_code.state
+    ]:
+        await message.answer("⚠️ Вы проходите регистрацию. Пожалуйста, завершите её или введите /отмена.")
+        return
+    
+    if current_state == TrackManagement.deleting_track.state:
+        await message.answer("⚠️ Сейчас вы удаляете трек-номер. Завершите это действие или введите /отмена.")
+        return
+    
+    if current_state == TrackManagement.selecting_track.state:
+        await message.answer("⚠️ Сейчас вы подписываете трек-номер. Сначала завершите это действие или введите /отмена.")
+        return
+
+        
     user_input = " ".join(message.text.split())  # Убираем лишние пробелы
     user_id = str(message.from_user.id)
 
