@@ -96,7 +96,7 @@ USER_COMMANDS = [
     BotCommand(command="check_status", description="📦 Проверить статус посылок"),
     BotCommand(command="sign_track", description="🖊 Подписать трек-номер"),
     BotCommand(command="delete_track", description="❌ Удалить трек-номер"),
-    BotCommand(command="contact_manager", description="📞 Связаться с менеджером")
+    BotCommand(command="contact_manager", description="📞 Связаться с менеджером"),
     BotCommand(command="отмена", description="❌ Отменить текущее действие"),
 ]
 
