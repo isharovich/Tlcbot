@@ -230,70 +230,116 @@ class TrackSigning(StatesGroup):
     selecting_track = State()
     entering_signature = State()
 
+
+
+# Хранилище активных пользователей в процессе FSM
+active_states = {}
+
 # ✅ Подписать трек-номер
 @router.message(F.text.in_(["🖊 Подписать трек-номер", "/sign_track"]))
 async def sign_track_handler(message: Message, state: FSMContext):
-    """ Запуск процесса подписания трека """
-    await state.clear()  # Очищаем прошлые состояния
     user_id = str(message.from_user.id)
 
+    # Предотвращаем повторный запуск FSM
+    current_state = await state.get_state()
+    if current_state is not None:
+        await message.answer("⏳ Пожалуйста, завершите предыдущее действие или введите /отмена.")
+        return
+
+    await state.clear()
+
     # Получаем треки пользователя
-    user_tracks = [row[0] for row in tracking_sheet.get_all_values() if len(row) > 4 and row[4] == user_id]
+    user_tracks = [
+        row[0].strip().upper()
+        for row in tracking_sheet.get_all_values()
+        if len(row) > 4 and row[4] == user_id
+    ]
 
     if not user_tracks:
         await message.answer("📭 У вас нет активных трек-номеров.")
         return
 
+    # Создаем клавиатуру с треками
     keyboard = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=track)] for track in user_tracks],
         resize_keyboard=True,
         one_time_keyboard=True
     )
 
-    await state.set_state(TrackManagement.selecting_track)
-    await asyncio.sleep(0.1)  # Даём FSM зафиксироваться
+    await state.set_state(TrackSigning.selecting_track)
+    await asyncio.sleep(0.1)
     await message.answer("✏️ Выберите трек-номер, который хотите подписать:", reply_markup=keyboard)
 
 
-@router.message(TrackManagement.selecting_track)
-async def track_selected_handler(message: Message, state: FSMContext):
-    """ Обработчик выбора трека """
+# Обработка выбора трека
+@router.message(TrackSigning.selecting_track)
+async def process_track_selection(message: Message, state: FSMContext):
     selected_track = message.text.strip().upper()
-    await state.update_data(selected_track=selected_track)
-    await state.set_state(TrackManagement.adding_signature)
-    await message.answer("✏️ Введите подпись для этого трек-номера:", reply_markup=ReplyKeyboardRemove())
+    user_id = str(message.from_user.id)
 
-@router.message(TrackManagement.adding_signature)
-async def track_signature_handler(message: Message, state: FSMContext):
-    """ Обработчик подписи трека """
+    # Проверка, есть ли трек у пользователя
+    user_tracks = [
+        row[0].strip().upper()
+        for row in tracking_sheet.get_all_values()
+        if len(row) > 4 and row[4] == user_id
+    ]
+
+    if selected_track not in user_tracks:
+        await message.answer("❌ Такой трек не найден. Пожалуйста, выберите один из списка.")
+        return
+
+    await state.update_data(selected_track=selected_track)
+    await state.set_state(TrackSigning.entering_signature)
+    await asyncio.sleep(0.1)
+    await message.answer("✏️ Введите подпись для выбранного трек-номера:", reply_markup=ReplyKeyboardRemove())
+
+# Обработка подписи
+@router.message(TrackSigning.entering_signature)
+async def process_signature(message: Message, state: FSMContext):
+    user_id = str(message.from_user.id)
     data = await state.get_data()
     selected_track = data.get("selected_track")
     signature = message.text.strip()
 
     if not selected_track:
-        await message.answer("❌ Ошибка! Сначала выберите трек-номер.")
+        await message.answer("⚠️ Что-то пошло не так. Введите /отмена и начните заново.")
         await state.clear()
         return
 
+    # Обновляем подпись в таблице
     records = tracking_sheet.get_all_values()
     for i, row in enumerate(records):
-        if row[0].strip().lower() == selected_track.lower() and len(row) > 4:
-            tracking_sheet.update_cell(i + 1, 4, signature)  # Обновляем подпись
-            await message.answer(f"✅ Подпись добавлена к {selected_track}: {signature}")
+        if row[0].strip().upper() == selected_track and len(row) > 4 and row[4] == user_id:
+            tracking_sheet.update_cell(i + 1, 4, signature)  # Столбец D — подпись
+            await message.answer(f"✅ Подпись обновлена для {selected_track}: {signature}")
             await state.clear()
             return
 
-    await message.answer("❌ Не удалось найти трек-номер.")
+    await message.answer("❌ Не удалось найти трек-номер. Введите /отмена и начните заново.")
     await state.clear()
+
+    
+class TrackDeleting(StatesGroup):
+    selecting_track = State()
 
 # ✅ Удалить трек-номер
 @router.message(F.text.in_(["❌ Удалить трек-номер", "/delete_track"]))
 async def delete_track_handler(message: Message, state: FSMContext):
-    """ Запуск процесса удаления трека """
-    await state.clear()  # Очищаем прошлые состояния
     user_id = str(message.from_user.id)
 
-    user_tracks = [row[0] for row in tracking_sheet.get_all_values() if len(row) > 4 and row[4] == user_id]
+    current_state = await state.get_state()
+    if current_state is not None:
+        await message.answer("⏳ Завершите предыдущее действие или введите /отмена.")
+        return
+
+    await state.clear()
+
+    # Получаем треки пользователя
+    user_tracks = [
+        row[0].strip().upper()
+        for row in tracking_sheet.get_all_values()
+        if len(row) > 4 and row[4] == user_id
+    ]
 
     if not user_tracks:
         await message.answer("📭 У вас нет активных трек-номеров.")
@@ -305,27 +351,28 @@ async def delete_track_handler(message: Message, state: FSMContext):
         one_time_keyboard=True
     )
 
-    await state.set_state(TrackManagement.deleting_track)
-    await asyncio.sleep(0.1)  # Даём FSM зафиксироваться
+    await state.set_state(TrackDeleting.selecting_track)
+    await asyncio.sleep(0.1)
     await message.answer("❌ Выберите трек-номер, который хотите удалить:", reply_markup=keyboard)
 
 
-@router.message(TrackManagement.deleting_track)
-async def track_deletion_handler(message: Message, state: FSMContext):
-    """ Обработчик удаления трека """
-    track_number = message.text.strip().upper()
+
+@router.message(TrackDeleting.selecting_track)
+async def confirm_deletion(message: Message, state: FSMContext):
     user_id = str(message.from_user.id)
+    track_to_delete = message.text.strip().upper()
 
     records = tracking_sheet.get_all_values()
+
     for i, row in enumerate(records):
-        if row[0].strip().lower() == track_number.lower() and len(row) > 4 and row[4] == user_id:
+        if row[0].strip().upper() == track_to_delete and len(row) > 4 and row[4] == user_id:
             tracking_sheet.delete_rows(i + 1)
-            await message.answer(f"✅ Трек-номер {track_number} удалён!", reply_markup=ReplyKeyboardRemove())
+            await message.answer(f"✅ Трек-номер {track_to_delete} удалён.", reply_markup=user_keyboard)
             await state.clear()
             return
 
-    await message.answer("❌ Не удалось найти этот трек-номер.")
-    await state.clear()
+    await message.answer("❌ Не удалось найти трек-номер. Пожалуйста, выберите из списка или введите /отмена.")
+
 
 # ✅ /contact_manager – связь с менеджером
 @router.message(F.text.in_(["📞 Связаться с менеджером", "/contact_manager"]))
@@ -513,10 +560,19 @@ async def check_kz_handler(message: Message):
 
     await message.answer(f"✅ Отправлено {found} уведомлений! Заполнены столбцы.")
     
-@router.message(F.text == "/отмена")
+    
+# ✅ Отмена
+@router.message(F.text.lower().in_(["отмена", "/cancel", "/отмена"]))
 async def cancel_handler(message: Message, state: FSMContext):
+    user_id = str(message.from_user.id)
     await state.clear()
-    await message.answer("❌ Действие отменено. Вы можете продолжить работу.", reply_markup=user_keyboard)
+
+    # Безопасно удаляем активный статус, если используется
+    if "active_states" in globals():
+        active_states.pop(user_id, None)
+
+    await message.answer("❌ Действие отменено.", reply_markup=user_keyboard)
+
 
 
 
@@ -563,26 +619,39 @@ async def add_tracking_handler(message: Message, state: FSMContext):
     track_number = parts[0].upper()  # Первый элемент — трек-номер
     signature = parts[1] if len(parts) > 1 else ""  # Остальное — подпись (если есть)
 
-    # Проверка длины трек-номера
+        # Проверка длины трек-номера
     if not (8 <= len(track_number) <= 20):
         await message.answer("❌ Трек-номер должен содержать от 8 до 20 символов. Попробуйте ещё раз.")
         return
 
     # Проверяем, зарегистрирован ли пользователь
-    id_column = users_sheet.col_values(1)  # Берем первый столбец (user_id)
+    id_column = users_sheet.col_values(1)
     if user_id not in id_column:
         await message.answer("⚠️ Вы не зарегистрированы! Пройдите регистрацию командой /register")
         return
 
-    # Находим строку пользователя в таблице "Пользователи"
+    # Проверка на повторный трек
+    existing_tracks = [
+        row[0].strip().upper()
+        for row in tracking_sheet.get_all_values()
+        if len(row) > 4 and row[4] == user_id
+    ]
+    if track_number in existing_tracks:
+        await message.answer(f"⚠️ Трек-номер {track_number} уже добавлен ранее.")
+        return
+
+    # Получаем код менеджера
     row_index = id_column.index(user_id) + 1
-    manager_code = users_sheet.cell(row_index, 5).value  # Код менеджера находится в 5-м столбце
+    manager_code = users_sheet.cell(row_index, 5).value
     current_date = datetime.now().strftime("%Y-%m-%d")
 
     logging.info(f"✅ Добавляю трек в Tracking: {track_number}, Подпись: {signature}")
 
     # Добавляем в "Трекинг"
-    tracking_sheet.append_row([track_number, current_date, manager_code, signature, user_id], value_input_option="USER_ENTERED")
+    tracking_sheet.append_row(
+        [track_number, current_date, manager_code, signature, user_id],
+        value_input_option="USER_ENTERED"
+    )
 
     await message.answer(f"✅ Трек-номер {track_number} сохранён{' с подписью: ' + signature if signature else ''}.")
 
