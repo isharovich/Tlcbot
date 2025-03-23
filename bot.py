@@ -274,6 +274,10 @@ async def sign_track_handler(message: Message, state: FSMContext):
 # Обработка выбора трека
 @router.message(TrackSigning.selecting_track)
 async def process_track_selection(message: Message, state: FSMContext):
+    if message.text.lower() in ["отмена", "/отмена", "/cancel"]:
+        await cancel_handler(message, state)
+        return
+    
     selected_track = message.text.strip().upper()
     user_id = str(message.from_user.id)
 
@@ -296,6 +300,10 @@ async def process_track_selection(message: Message, state: FSMContext):
 # Обработка подписи
 @router.message(TrackSigning.entering_signature)
 async def process_signature(message: Message, state: FSMContext):
+    if message.text.lower() in ["отмена", "/отмена", "/cancel"]:
+        await cancel_handler(message, state)
+        return
+    
     user_id = str(message.from_user.id)
     data = await state.get_data()
     selected_track = data.get("selected_track")
@@ -359,6 +367,10 @@ async def delete_track_handler(message: Message, state: FSMContext):
 
 @router.message(TrackDeleting.selecting_track)
 async def confirm_deletion(message: Message, state: FSMContext):
+    if message.text.lower() in ["отмена", "/отмена", "/cancel"]:
+        await cancel_handler(message, state)
+        return
+    
     user_id = str(message.from_user.id)
     track_to_delete = message.text.strip().upper()
 
