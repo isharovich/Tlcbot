@@ -96,7 +96,7 @@ class QueueMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         if isinstance(event, Message):
             return await queued_message_handler(event, handler)
-        return await handler(event, data)
+        return await handler(event=event, data=data)
 
 
 user_message_queues = defaultdict(deque)
@@ -109,7 +109,7 @@ async def queued_message_handler(message: Message, handler):
         await message.answer("🛑 Вы отправили слишком много сообщений. Подождите обработки.")
         return
 
-    user_message_queues[user_id].append((message, handler))
+    user_message_queues[user_id].append(message)
 
     if user_id in processing_flags:
         return
@@ -118,14 +118,15 @@ async def queued_message_handler(message: Message, handler):
 
     try:
         while user_message_queues[user_id]:
-            msg, handler_func = user_message_queues[user_id].popleft()
+            msg = user_message_queues[user_id].popleft()
             try:
-                await handler_func(msg, {})
+                await handler(event=msg, data={})
             except Exception as e:
                 logging.error(f"❌ Ошибка в обработке сообщения: {e}")
                 await msg.answer("⚠️ Произошла ошибка. Попробуйте ещё раз.")
     finally:
         processing_flags.remove(user_id)
+
 
         
 # Создание бота и диспетчера
