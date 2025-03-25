@@ -743,13 +743,14 @@ async def queued_message_handler(message: Message, handler):
         while user_message_queues[user_id]:
             msg, handler_func = user_message_queues[user_id].popleft()
             try:
-                # Передаем сообщение в обработчик, указывая его как аргумент
-                await handler_func(message=msg)
+                # Вызываем обработчик без передачи kwargs
+                await handler_func(msg)
             except Exception as e:
                 logging.error(f"❌ Ошибка в обработке сообщения: {e}")
                 await msg.answer("⚠️ Произошла ошибка. Попробуйте ещё раз.")
     finally:
         processing_flags.remove(user_id)
+
 
 async def main():
     logging.basicConfig(level=logging.INFO)
