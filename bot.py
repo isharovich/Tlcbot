@@ -95,32 +95,37 @@ processing_flags = set()
 class QueueMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         if isinstance(event, Message):
-            user_id = str(event.from_user.id)
+            return await queued_message_handler(event, handler)
+        return await handler(event, data)
 
-            if len(user_message_queues[user_id]) >= 10:
-                await event.answer("🛑 Вы отправили слишком много сообщений. Подождите обработки.")
-                return
 
-            user_message_queues[user_id].append((event, handler))
+user_message_queues = defaultdict(deque)
+processing_flags = set()
 
-            if user_id in processing_flags:
-                return
+async def queued_message_handler(message: Message, handler):
+    user_id = str(message.from_user.id)
 
-            processing_flags.add(user_id)
+    if len(user_message_queues[user_id]) >= 10:
+        await message.answer("🛑 Вы отправили слишком много сообщений. Подождите обработки.")
+        return
 
+    user_message_queues[user_id].append((message, handler))
+
+    if user_id in processing_flags:
+        return
+
+    processing_flags.add(user_id)
+
+    try:
+        while user_message_queues[user_id]:
+            msg, handler_func = user_message_queues[user_id].popleft()
             try:
-                while user_message_queues[user_id]:
-                    msg, handler_func = user_message_queues[user_id].popleft()
-                    try:
-                        await handler_func(event=msg, data={})  # Важно: сюда подаём именно event и data
-                    except Exception as e:
-                        logging.error(f"❌ Ошибка в обработке сообщения: {e}")
-                        await msg.answer("⚠️ Произошла ошибка. Попробуйте ещё раз.")
-            finally:
-                processing_flags.remove(user_id)
-        else:
-            return await handler(event, data)
-
+                await handler_func(msg, {})  # 🟢 Правильный вызов
+            except Exception as e:
+                logging.error(f"❌ Ошибка в обработке сообщения: {e}")
+                await msg.answer("⚠️ Произошла ошибка. Попробуйте ещё раз.")
+    finally:
+        processing_flags.remove(user_id)
 
         
 # Создание бота и диспетчера
