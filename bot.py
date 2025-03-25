@@ -7,14 +7,15 @@ from aiogram.types import Message, BotCommand, BotCommandScopeChat, ReplyKeyboar
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.filters import Command  # ✅ ЭТА СТРОКА — обязательна!
 from datetime import datetime
-from aiogram import Router, F
 import os
 import json
 from collections import defaultdict, deque
 
 user_message_queues = defaultdict(deque)
 processing_flags = set()
+
 
 # ==========================
 # 🔹 Настройки бота и таблицы
