@@ -89,13 +89,48 @@ user_keyboard = ReplyKeyboardMarkup(
     one_time_keyboard=False  # Клавиатура остаётся на экране
 )
 
+user_message_queues = defaultdict(deque)
+processing_flags = set()
+
+class QueueMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        if isinstance(event, Message):
+            return await queued_message_handler(event, handler)
+        return await handler(event, data)
+
+async def queued_message_handler(message: Message, handler):
+    user_id = str(message.from_user.id)
+
+    if len(user_message_queues[user_id]) >= 10:
+        await message.answer("🛑 Вы отправили слишком много сообщений. Подождите обработки.")
+        return
+
+    user_message_queues[user_id].append((message, handler))
+
+    if user_id in processing_flags:
+        return
+
+    processing_flags.add(user_id)
+
+    try:
+        while user_message_queues[user_id]:
+            msg, handler_func = user_message_queues[user_id].popleft()
+            try:
+                await handler_func(msg)
+            except Exception as e:
+                logging.error(f"❌ Ошибка в обработке сообщения: {e}")
+                await msg.answer("⚠️ Произошла ошибка. Попробуйте ещё раз.")
+    finally:
+        processing_flags.remove(user_id)
+
+        
 # Создание бота и диспетчера
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 router = Router()
-
-# Подключаем роутер и middleware
 dp.include_router(router)
+dp.message.middleware(QueueMiddleware())  # <-- эта строка остаётся здесь
+
 
 # ==========================
 # 🔹 Команды бота
@@ -718,46 +753,10 @@ async def update_texts_handler(message: Message):
     load_texts()  # Загружаем тексты заново из Google Sheets
     await message.answer("✅ Тексты обновлены!")
     
-class QueueMiddleware(BaseMiddleware):
-    async def __call__(self, handler, event, data):
-        if isinstance(event, Message):
-            return await queued_message_handler(event, handler)
-        return await handler(event, data)
-
-async def queued_message_handler(message: Message, handler):
-    user_id = str(message.from_user.id)
-
-    if len(user_message_queues[user_id]) >= 10:
-        await message.answer("🛑 Вы отправили слишком много сообщений. Подождите обработки.")
-        return
-
-    user_message_queues[user_id].append((message, handler))
-
-    if user_id in processing_flags:
-        return
-
-    processing_flags.add(user_id)
-
-    try:
-        while user_message_queues[user_id]:
-            msg, handler_func = user_message_queues[user_id].popleft()
-            try:
-                # Вызываем обработчик без передачи kwargs
-                await handler_func(msg)
-            except Exception as e:
-                logging.error(f"❌ Ошибка в обработке сообщения: {e}")
-                await msg.answer("⚠️ Произошла ошибка. Попробуйте ещё раз.")
-    finally:
-        processing_flags.remove(user_id)
-
-
 async def main():
     logging.basicConfig(level=logging.INFO)
     load_texts()
     await set_bot_commands()
-
-    dp.message.middleware(QueueMiddleware())
-
     await bot.delete_webhook(drop_pending_updates=True)
     logging.info("✅ Бот успешно запущен и готов к работе!")
     await dp.start_polling(bot)
