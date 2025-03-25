@@ -95,34 +95,32 @@ processing_flags = set()
 class QueueMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         if isinstance(event, Message):
-            return await queued_message_handler(event, handler)
-        return await handler(event, data)
+            user_id = str(event.from_user.id)
 
-async def queued_message_handler(message: Message, handler):
-    user_id = str(message.from_user.id)
+            if len(user_message_queues[user_id]) >= 10:
+                await event.answer("🛑 Вы отправили слишком много сообщений. Подождите обработки.")
+                return
 
-    if len(user_message_queues[user_id]) >= 10:
-        await message.answer("🛑 Вы отправили слишком много сообщений. Подождите обработки.")
-        return
+            user_message_queues[user_id].append((event, handler))
 
-    user_message_queues[user_id].append((message, handler))
+            if user_id in processing_flags:
+                return
 
-    if user_id in processing_flags:
-        return
+            processing_flags.add(user_id)
 
-    processing_flags.add(user_id)
-
-    try:
-        while user_message_queues[user_id]:
-            msg, handler_func = user_message_queues[user_id].popleft()
             try:
-                await handler_func(event=msg, data={})
+                while user_message_queues[user_id]:
+                    msg, handler_func = user_message_queues[user_id].popleft()
+                    try:
+                        await handler_func(event=msg, data={})  # Важно: сюда подаём именно event и data
+                    except Exception as e:
+                        logging.error(f"❌ Ошибка в обработке сообщения: {e}")
+                        await msg.answer("⚠️ Произошла ошибка. Попробуйте ещё раз.")
+            finally:
+                processing_flags.remove(user_id)
+        else:
+            return await handler(event, data)
 
-            except Exception as e:
-                logging.error(f"❌ Ошибка в обработке сообщения: {e}")
-                await msg.answer("⚠️ Произошла ошибка. Попробуйте ещё раз.")
-    finally:
-        processing_flags.remove(user_id)
 
         
 # Создание бота и диспетчера
