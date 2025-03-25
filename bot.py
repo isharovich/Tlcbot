@@ -76,14 +76,6 @@ class TrackManagement(StatesGroup):
     deleting_track = State()
 
 
-# ==========================
-# 🔹 Настройка бота
-# ==========================
-bot = Bot(token=TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
-router = Router()
-dp.include_router(router)
-
 
 # ==========================
 # 🔹 Создание клавиатуры для пользователей
@@ -97,6 +89,14 @@ user_keyboard = ReplyKeyboardMarkup(
     one_time_keyboard=False  # Клавиатура остаётся на экране
 )
 
+# Создание бота и диспетчера
+bot = Bot(token=TOKEN)
+dp = Dispatcher(storage=MemoryStorage())
+router = Router()
+
+# Подключаем роутер и middleware
+dp.include_router(router)
+dp.message.middleware(QueueMiddleware())  # Здесь подключаем наш middleware
 
 # ==========================
 # 🔹 Команды бота
@@ -743,26 +743,21 @@ async def queued_message_handler(message: Message, handler):
         while user_message_queues[user_id]:
             msg, handler_func = user_message_queues[user_id].popleft()
             try:
-                await handler_func(msg)
+                # Передаем сообщение в обработчик, указывая его как аргумент
+                await handler_func(message=msg)
             except Exception as e:
                 logging.error(f"❌ Ошибка в обработке сообщения: {e}")
                 await msg.answer("⚠️ Произошла ошибка. Попробуйте ещё раз.")
     finally:
         processing_flags.remove(user_id)
 
-dp.message.middleware(QueueMiddleware())
-
-
-
 async def main():
     logging.basicConfig(level=logging.INFO)
     load_texts()
     await set_bot_commands()
     await bot.delete_webhook(drop_pending_updates=True)
-    logging.info("✅ Бот успешно запущен и готов к работе!")  # Логируем запуск
-    await dp.start_polling(bot)
-
+    logging.info("✅ Бот успешно запущен и готов к работе!")
+    await dp.start_polling(bot)  # Запуск бота
 
 if __name__ == "__main__":
     asyncio.run(main())
-
