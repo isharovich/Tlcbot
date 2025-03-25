@@ -96,7 +96,6 @@ router = Router()
 
 # Подключаем роутер и middleware
 dp.include_router(router)
-dp.message.middleware(QueueMiddleware())  # Здесь подключаем наш middleware
 
 # ==========================
 # 🔹 Команды бота
@@ -757,7 +756,6 @@ async def main():
     load_texts()
     await set_bot_commands()
 
-    # подключаем middleware тут, когда QueueMiddleware уже определён
     dp.message.middleware(QueueMiddleware())
 
     await bot.delete_webhook(drop_pending_updates=True)
