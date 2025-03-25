@@ -752,7 +752,7 @@ async def queued_message_handler(message: Message, handler):
         processing_flags.remove(user_id)
 
 
-aasync def main():
+async def main():
     logging.basicConfig(level=logging.INFO)
     load_texts()
     await set_bot_commands()
