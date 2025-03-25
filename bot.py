@@ -14,9 +14,6 @@ import json
 from collections import defaultdict, deque
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 
-user_message_queues = defaultdict(deque)
-processing_flags = set()
-
 
 # ==========================
 # 🔹 Настройки бота и таблицы
@@ -89,44 +86,33 @@ user_keyboard = ReplyKeyboardMarkup(
     one_time_keyboard=False  # Клавиатура остаётся на экране
 )
 
-user_message_queues = defaultdict(deque)
-processing_flags = set()
-
 class QueueMiddleware(BaseMiddleware):
+    def __init__(self, max_queue: int = 10):
+        self.user_locks: dict[int, asyncio.Lock] = {}
+        self.waiting_count: dict[int, int] = {}
+        self.max_queue = max_queue
+
     async def __call__(self, handler, event, data):
-        if isinstance(event, Message):
-            return await queued_message_handler(event, handler)
-        return await handler(event=event, data=data)
+        user_id = event.from_user.id if event.from_user else None
+        if user_id is None:
+            return await handler(event, data)
 
+        if user_id not in self.user_locks:
+            self.user_locks[user_id] = asyncio.Lock()
+            self.waiting_count[user_id] = 0
 
-user_message_queues = defaultdict(deque)
-processing_flags = set()
+        lock = self.user_locks[user_id]
 
-async def queued_message_handler(message: Message, handler):
-    user_id = str(message.from_user.id)
-
-    if len(user_message_queues[user_id]) >= 10:
-        await message.answer("🛑 Вы отправили слишком много сообщений. Подождите обработки.")
-        return
-
-    user_message_queues[user_id].append(message)
-
-    if user_id in processing_flags:
-        return
-
-    processing_flags.add(user_id)
-
-    try:
-        while user_message_queues[user_id]:
-            msg = user_message_queues[user_id].popleft()
-            try:
-                await handler(event=msg, data={})
-            except Exception as e:
-                logging.error(f"❌ Ошибка в обработке сообщения: {e}")
-                await msg.answer("⚠️ Произошла ошибка. Попробуйте ещё раз.")
-    finally:
-        processing_flags.remove(user_id)
-
+        if lock.locked():
+            if self.waiting_count[user_id] >= self.max_queue:
+                return  # Пропускаем сообщение
+            self.waiting_count[user_id] += 1
+            async with lock:
+                self.waiting_count[user_id] -= 1
+                return await handler(event, data)
+        else:
+            async with lock:
+                return await handler(event, data)
 
         
 # Создание бота и диспетчера
