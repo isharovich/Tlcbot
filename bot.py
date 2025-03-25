@@ -120,7 +120,7 @@ async def queued_message_handler(message: Message, handler):
         while user_message_queues[user_id]:
             msg, handler_func = user_message_queues[user_id].popleft()
             try:
-                await handler_func(message=msg)  # ✅ ПРАВИЛЬНО
+                await handler_func(msg, {})
             except Exception as e:
                 logging.error(f"❌ Ошибка в обработке сообщения: {e}")
                 await msg.answer("⚠️ Произошла ошибка. Попробуйте ещё раз.")
