@@ -84,6 +84,9 @@ dp = Dispatcher(storage=MemoryStorage())
 router = Router()
 dp.include_router(router)
 
+dp.message.middleware(QueueMiddleware())
+
+
 # ==========================
 # 🔹 Создание клавиатуры для пользователей
 # ==========================
@@ -723,8 +726,7 @@ class QueueMiddleware(BaseMiddleware):
         if isinstance(event, Message):
             return await queued_message_handler(event, handler)
         return await handler(event, data)
-    
-@dp.message()
+
 async def queued_message_handler(message: Message, handler):
     user_id = str(message.from_user.id)
 
