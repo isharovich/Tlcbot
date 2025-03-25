@@ -84,8 +84,6 @@ dp = Dispatcher(storage=MemoryStorage())
 router = Router()
 dp.include_router(router)
 
-dp.message.middleware(QueueMiddleware())
-
 
 # ==========================
 # 🔹 Создание клавиатуры для пользователей
@@ -752,6 +750,7 @@ async def queued_message_handler(message: Message, handler):
     finally:
         processing_flags.remove(user_id)
 
+dp.message.middleware(QueueMiddleware())
 
 
 
