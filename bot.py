@@ -11,6 +11,10 @@ from datetime import datetime
 from aiogram import Router, F
 import os
 import json
+from collections import defaultdict, deque
+
+user_message_queues = defaultdict(deque)
+processing_flags = set()
 
 # ==========================
 # 🔹 Настройки бота и таблицы
@@ -128,50 +132,83 @@ async def start_handler(message: Message):
     logging.info(f"/start от {message.from_user.id}")
     await message.answer(get_text("start_message"))
 
-# ✅ /register – регистрация пользователя
-@router.message(F.text == "/register")
-async def register_handler(message: Message, state: FSMContext):
+# Храним ID пользователей, у которых идёт обработка шага
+processing_users = set()
+
+@router.message(Command("register"))
+async def register_command(message: Message, state: FSMContext):
     user_id = str(message.from_user.id)
+
+    # Проверка: уже зарегистрирован?
     existing = users_sheet.col_values(1)
     if user_id in existing:
-        await message.answer("✅ Вы уже зарегистрированы! Можете отправлять трек-номера.")
+        await message.answer(get_text("already_registered"))
         return
-    await state.clear()  # Очистка всех прошлых состояний
-    await state.update_data(user_id=user_id)
-    await state.set_state(Registration.name)
-    await asyncio.sleep(0.1)  # Даем FSM зафиксироваться
-    await message.answer("📌 Введите ваше **имя** (или введите /отмена):")
+
+    # Защита от двойных кликов и лагов
+    if user_id in processing_users:
+        await message.answer("⏳ Подождите, идёт обработка предыдущего шага...")
+        return
+
+    processing_users.add(user_id)
+    try:
+        await state.clear()
+        await state.update_data(user_id=user_id)
+        await state.set_state(Registration.name)
+        await asyncio.sleep(0.1)
+        await message.answer(get_text("ask_name"))
+    finally:
+        processing_users.discard(user_id)
 
 @router.message(Registration.name)
 async def register_name_handler(message: Message, state: FSMContext):
+    if message.text.lower() in ["отмена", "/отмена", "/cancel"]:
+        await cancel_handler(message, state)
+        return
+
     await state.update_data(name=message.text.strip())
     await state.set_state(Registration.city)
-    await message.answer("🏙 Введите ваш **город**:")
+    await message.answer(get_text("ask_city"))
 
 @router.message(Registration.city)
 async def register_city_handler(message: Message, state: FSMContext):
+    if message.text.lower() in ["отмена", "/отмена", "/cancel"]:
+        await cancel_handler(message, state)
+        return
+
     await state.update_data(city=message.text.strip())
     await state.set_state(Registration.phone)
-    await message.answer("📞 Введите ваш **номер телефона**:")
+    await message.answer(get_text("ask_phone"))
 
 @router.message(Registration.phone)
 async def register_phone_handler(message: Message, state: FSMContext):
+    if message.text.lower() in ["отмена", "/отмена", "/cancel"]:
+        await cancel_handler(message, state)
+        return
+
     await state.update_data(phone=message.text.strip())
     await state.set_state(Registration.manager_code)
-    await message.answer("🏷 Введите **Индивидуальный код** (его дал вам менеджер):")
+    await message.answer(get_text("ask_manager_code"))
 
 @router.message(Registration.manager_code)
 async def register_manager_handler(message: Message, state: FSMContext):
+    if message.text.lower() in ["отмена", "/отмена", "/cancel"]:
+        await cancel_handler(message, state)
+        return
+
     data = await state.get_data()
     user_id = data["user_id"]
     name = data["name"]
     city = data["city"]
     phone = data["phone"]
     manager_code = message.text.strip()
-    logging.info(f"Регистрирую: {data}, код: {manager_code}")
+
+    logging.info(f"✅ Регистрируем: {user_id}, {name}, {city}, {phone}, код: {manager_code}")
+
     users_sheet.append_row([user_id, name, city, phone, manager_code])
-    await message.answer("✅ Регистрация завершена! Теперь вы можете отправлять трек-номера.", reply_markup=user_keyboard)
+    await message.answer(get_text("registration_complete"), reply_markup=user_keyboard)
     await state.clear()
+
 
 # ✅ /check_status – проверка треков (Оптимизированная версия)
 @router.message(F.text == "/check_status")
@@ -678,6 +715,33 @@ async def update_texts_handler(message: Message):
 
     load_texts()  # Загружаем тексты заново из Google Sheets
     await message.answer("✅ Тексты обновлены!")
+    
+@dp.message()
+async def queued_message_handler(message: Message):
+    user_id = str(message.from_user.id)
+
+    # 💥 Ограничение: максимум 2 сообщения (1 в очереди + 1 обрабатывается)
+    if len(user_message_queues[user_id]) >= 10:
+        await message.answer("🛑 Вы отправили слишком много сообщений. Подождите обработки.")
+        return
+
+
+    # Добавляем в очередь и начинаем обработку
+    user_message_queues[user_id].append(message)
+    processing_flags.add(user_id)
+
+    try:
+        while user_message_queues[user_id]:
+            msg = user_message_queues[user_id].popleft()
+            try:
+                await dp.propagate_event(dp.message, msg)
+            except Exception as e:
+                logging.error(f"❌ Ошибка при обработке сообщения: {e}")
+                await msg.answer("⚠️ Произошла ошибка. Попробуйте ещё раз.")
+    finally:
+        processing_flags.remove(user_id)
+
+
 
 async def main():
     logging.basicConfig(level=logging.INFO)
