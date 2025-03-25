@@ -12,6 +12,7 @@ from datetime import datetime
 import os
 import json
 from collections import defaultdict, deque
+from aiogram.dispatcher.middlewares.base import BaseMiddleware
 
 user_message_queues = defaultdict(deque)
 processing_flags = set()
@@ -717,30 +718,38 @@ async def update_texts_handler(message: Message):
     load_texts()  # Загружаем тексты заново из Google Sheets
     await message.answer("✅ Тексты обновлены!")
     
+class QueueMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        if isinstance(event, Message):
+            return await queued_message_handler(event, handler)
+        return await handler(event, data)
+    
 @dp.message()
-async def queued_message_handler(message: Message):
+async def queued_message_handler(message: Message, handler):
     user_id = str(message.from_user.id)
 
-    # 💥 Ограничение: максимум 2 сообщения (1 в очереди + 1 обрабатывается)
     if len(user_message_queues[user_id]) >= 10:
         await message.answer("🛑 Вы отправили слишком много сообщений. Подождите обработки.")
         return
 
+    user_message_queues[user_id].append((message, handler))
 
-    # Добавляем в очередь и начинаем обработку
-    user_message_queues[user_id].append(message)
+    if user_id in processing_flags:
+        return
+
     processing_flags.add(user_id)
 
     try:
         while user_message_queues[user_id]:
-            msg = user_message_queues[user_id].popleft()
+            msg, handler_func = user_message_queues[user_id].popleft()
             try:
-                await dp.propagate_event(dp.message, msg)
+                await handler_func(msg)
             except Exception as e:
-                logging.error(f"❌ Ошибка при обработке сообщения: {e}")
+                logging.error(f"❌ Ошибка в обработке сообщения: {e}")
                 await msg.answer("⚠️ Произошла ошибка. Попробуйте ещё раз.")
     finally:
         processing_flags.remove(user_id)
+
 
 
 
