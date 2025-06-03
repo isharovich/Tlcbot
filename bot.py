@@ -239,7 +239,7 @@ async def register_manager_handler(message: Message, state: FSMContext):
 
 
 # ✅ /check_status – проверка треков (Оптимизированная версия)
-@router.message(F.text == "/check_status")
+@router.message(F.text.in_(["📦 Проверить статус посылок", "/check_status"]))
 async def check_status_handler(message: Message):
     user_id = str(message.from_user.id)
     
