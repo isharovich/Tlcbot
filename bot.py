@@ -760,3 +760,24 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+@dp.errors()
+async def global_error_handler(event, exception):
+    from aiogram.exceptions import TelegramForbiddenError
+
+    # Если это ошибка отправки сообщения (например, пользователь заблокировал бота)
+    if isinstance(exception, TelegramForbiddenError):
+        logging.warning(f"⚠️ Пользователь заблокировал бота — {event.from_user.id}")
+        return True  # подавляем ошибку
+
+    # Логируем другие ошибки
+    logging.exception(f"🔥 Глобальная ошибка: {exception}")
+
+    # Пытаемся уведомить пользователя (если это message-объект)
+    try:
+        if hasattr(event, "answer"):
+            await event.answer("❌ Произошла ошибка, но бот продолжает работать.")
+    except Exception as e:
+        logging.warning(f"❌ Не удалось отправить сообщение об ошибке: {e}")
+
+    return True  # Не передаём ошибку дальше, чтобы бот не упал
