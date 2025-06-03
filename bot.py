@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import asyncio
 import gspread
 from google.oauth2.service_account import Credentials
@@ -19,7 +19,7 @@ from aiogram.dispatcher.middlewares.base import BaseMiddleware
 # 🔹 Настройки бота и таблицы
 # ==========================
 
-TOKEN = "7537026112:AAEWPikFWldtFWKeyer7_iiH793rWApLc2U"  # Укажи свой токен прямо в коде или загрузи из переменной окружения
+TOKEN = "6974697621:AAHM4qa91k4nq4Hsbn-rSDTkL8-6hAsa3pA"  # Укажи свой токен прямо в коде или загрузи из переменной окружения
 SHEET_ID = "1QaR920L5bZUGNLk02M-lgXr9c5_nHJQVoPgPL7UVVY4"
 ADMIN_IDS = ["665932047", "473541446"]  # Telegram ID админа
 
