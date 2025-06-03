@@ -578,14 +578,19 @@ async def check_china_handler(message: Message):
             date_text = f" ({date})" if date else ""
             message_text = get_text("china_notification", track=china_track.upper()) + date_text
             await bot.send_message(user_id, message_text)
+            await asyncio.sleep(0.1)
 
-            # ✅ Заполняем "Код менеджера", "Подпись" и "ID Телеграма"
-            china_sheet.update(f"D{i + 1}", [[manager_code]])  # Код менеджера
-            china_sheet.update(f"E{i + 1}", [[signature]])  # Подпись
-            china_sheet.update(f"F{i + 1}", [[user_id]])  # ID Телеграма
+            china_sheet.update(f"D{i + 1}", [[manager_code]])
+            await asyncio.sleep(0.1)
 
-            china_sheet.update_cell(i + 1, 2, "✅")  # Помечаем, что уведомление отправлено
-            found += 1
+            china_sheet.update(f"E{i + 1}", [[signature]])
+            await asyncio.sleep(0.1)
+
+            china_sheet.update(f"F{i + 1}", [[user_id]])
+            await asyncio.sleep(0.1)
+
+            china_sheet.update_cell(i + 1, 2, "✅")
+            await asyncio.sleep(0.1)
 
     await message.answer(f"✅ Отправлено {found} уведомлений! Заполнены столбцы.")
 
