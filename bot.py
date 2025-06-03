@@ -628,17 +628,43 @@ async def check_kz_handler(message: Message):
                 break
 
         if user_id:
-            date_text = f" ({date})" if date else ""
-            message_text = get_text("kz_notification", track=kz_track.upper()) + date_text
-            await bot.send_message(user_id, message_text)
+           date_text = f" ({date})" if date else ""
+           message_text = get_text("kz_notification", track=kz_track.upper()) + date_text
 
-            # ✅ Заполняем "Код менеджера", "Подпись" и "ID Телеграма"
-            kz_sheet.update(f"D{i + 1}", [[manager_code]])  # Код менеджера
-            kz_sheet.update(f"E{i + 1}", [[signature]])  # Подпись
-            kz_sheet.update(f"F{i + 1}", [[user_id]])  # ID Телеграма
+    try:
+        await bot.send_message(user_id, message_text)
+    except:
+        pass
+    await asyncio.sleep(0.1)
 
-            kz_sheet.update_cell(i + 1, 2, "✅")
-            found += 1
+    try:
+        kz_sheet.update(f"D{i + 1}", [[manager_code]])
+    except:
+        pass
+    await asyncio.sleep(0.1)
+
+    try:
+        kz_sheet.update(f"E{i + 1}", [[signature]])
+    except:
+        pass
+    await asyncio.sleep(0.1)
+
+    try:
+        kz_sheet.update(f"F{i + 1}", [[user_id]])
+    except:
+        pass
+    await asyncio.sleep(0.1)
+
+    try:
+        kz_sheet.update_cell(i + 1, 2, "✅")
+    except:
+        pass
+    await asyncio.sleep(0.1)
+
+    found += 1
+
+     
+
 
     await message.answer(f"✅ Отправлено {found} уведомлений! Заполнены столбцы.")
     
