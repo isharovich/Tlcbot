@@ -14,10 +14,6 @@ import json
 from collections import defaultdict, deque
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
 
 # ==========================
 # 🔹 Настройки бота и таблицы
@@ -637,38 +633,42 @@ async def send_china_notifications(message: Message):
         row_index = item["row_index"]
 
         date_text = f" ({date})" if date else ""
+        text = get_text("china_notification", track=track) + date_text
+
         try:
-            await bot.send_message(user_id, get_text("china_notification", track=track) + date_text)
-            await asyncio.sleep(0.6)  # не нагружаем Telegram
-
-            # Обновляем таблицу (с паузами)
-            try:
-                china_sheet.update(f"D{row_index}", [[manager_code]])
-                await asyncio.sleep(0.2)
-                china_sheet.update(f"E{row_index}", [[signature]])
-                await asyncio.sleep(0.2)
-                china_sheet.update(f"F{row_index}", [[user_id]])
-                await asyncio.sleep(0.2)
-                china_sheet.update_cell(row_index, 2, "✅")
-                await asyncio.sleep(0.2)
-            except Exception as e:
-                logging.warning(f"⚠️ Ошибка обновления строки {row_index}: {e}")
-
-            count += 1
+            await bot.send_message(user_id, text)
+            logging.info(f"✅ Отправлено пользователю {user_id}: {track}")
+            await asyncio.sleep(0.6)
         except Exception as e:
-            logging.warning(f"⚠️ Не удалось отправить сообщение пользователю {user_id}: {e}")
+            logging.warning(f"❌ Ошибка при отправке {user_id}: {e}")
             await asyncio.sleep(1)
+            continue  # переходим к следующему
+
+        # Обновляем таблицу
+        try:
+            china_sheet.update(f"D{row_index}", [[manager_code]])
+            await asyncio.sleep(0.2)
+            china_sheet.update(f"E{row_index}", [[signature]])
+            await asyncio.sleep(0.2)
+            china_sheet.update(f"F{row_index}", [[user_id]])
+            await asyncio.sleep(0.2)
+            china_sheet.update_cell(row_index, 2, "✅")
+            await asyncio.sleep(0.2)
+        except Exception as e:
+            logging.warning(f"⚠️ Ошибка обновления таблицы (строка {row_index}): {e}")
+
+        count += 1
 
     # Очистка
     pending_notifications["china"] = []
     is_notifying["china"] = False
 
-    # Сообщаем админу
+    # Отправляем финальное сообщение админу
     for admin_id in ADMIN_IDS:
         try:
             await bot.send_message(admin_id, f"✅ Рассылка по Китаю завершена. Оповещено {count} человек.")
-        except:
-            pass
+        except Exception as e:
+            logging.warning(f"❌ Не удалось отправить отчёт админу {admin_id}: {e}")
 
 
 @router.message(F.text == "/check_kz")
