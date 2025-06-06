@@ -13,6 +13,24 @@ import os
 import json
 from collections import defaultdict, deque
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
+from aiogram.exceptions import RetryAfter
+
+from logging.handlers import RotatingFileHandler
+
+# 🔧 Настройка логирования с ротацией
+log_handler = RotatingFileHandler(
+    filename="bot.log",       # основной файл логов
+    maxBytes=1_000_000,       # максимум 1 МБ на файл
+    backupCount=5             # хранить до 5 файлов: bot.log.1, ..., bot.log.5
+)
+
+log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+log_handler.setFormatter(log_formatter)
+
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[log_handler]
+)
 
 
 # ==========================
@@ -504,7 +522,8 @@ async def check_issued_handler(message: Message):
 
     issued_records = issued_sheet.get_all_values()
     tracking_records = tracking_sheet.get_all_values()
-    updated_count = 0
+    notifications = []
+    sent_cache = set()
 
     for i in range(len(issued_records) - 1, 0, -1):
         row = issued_records[i]
@@ -525,34 +544,52 @@ async def check_issued_handler(message: Message):
                 user_id = track_row[4]
                 manager_code = track_row[2]
                 signature = track_row[3]
-
-                try:
-                    tracking_sheet.update_cell(j, 2, "Выдано")
-                except Exception as e:
-                    logging.warning(f"⚠️ Не удалось обновить статус в Трекинг: {e}")
                 break
 
         if user_id:
-            try:
-                issued_sheet.update(f"D{i + 1}", [[manager_code]])
-                await asyncio.sleep(0.1)
-                issued_sheet.update(f"E{i + 1}", [[signature]])
-                await asyncio.sleep(0.1)
-                issued_sheet.update(f"F{i + 1}", [[user_id]])
-                await asyncio.sleep(0.1)
-                issued_sheet.update_cell(i + 1, 2, "✅")  # Ставим галочку
-                await asyncio.sleep(0.1)
-            except Exception as e:
-                logging.warning(f"⚠️ Не удалось обновить строку {i + 1} в Выданное: {e}")
+            cache_key = f"{user_id}:{track}"
+            if cache_key in sent_cache:
                 continue
+            sent_cache.add(cache_key)
 
+            notifications.append({
+                "row_index": i + 1,
+                "user_id": user_id,
+                "manager_code": manager_code,
+                "signature": signature,
+                "track": track.upper()
+            })
+
+    if not notifications:
+        await message.answer("📭 Новых записей в 'Выданное' не найдено.")
+        return
+
+    await message.answer(f"🔄 Обновляю {len(notifications)} строк...")
+
+    updated_count = 0
+    for item in notifications:
+        row_index = item["row_index"]
+        user_id = item["user_id"]
+        manager_code = item["manager_code"]
+        signature = item["signature"]
+        track = item["track"]
+
+        try:
+            issued_sheet.update(f"D{row_index}", [[manager_code]])
+            await asyncio.sleep(0.2)
+            issued_sheet.update(f"E{row_index}", [[signature]])
+            await asyncio.sleep(0.2)
+            issued_sheet.update(f"F{row_index}", [[user_id]])
+            await asyncio.sleep(0.2)
+            issued_sheet.update_cell(row_index, 2, "✅")
+            await asyncio.sleep(0.2)
             updated_count += 1
+            logging.info(f"✅ Обновлено: {track} → {user_id}")
+        except Exception as e:
+            logging.warning(f"⚠️ Не удалось обновить строку {row_index}: {e}")
 
-    await message.answer(f"✅ Обновлено {updated_count} треков. Галочки поставлены.")
+    await message.answer(f"✅ Обновлено {updated_count} записей. Галочки поставлены.")
 
-# 🛡 Глобальные переменные для контроля
-is_notifying = {"china": False}
-pending_notifications = {"china": []}
 
 
 @router.message(F.text == "/check_china")
@@ -569,7 +606,6 @@ async def check_china_handler(message: Message):
     tracking_records = tracking_sheet.get_all_values()
     notifications = []
 
-    # Собираем уведомления
     for i in range(len(china_records) - 1, 0, -1):
         row = china_records[i]
         track = row[0].strip().lower()
@@ -579,117 +615,6 @@ async def check_china_handler(message: Message):
 
         if len(row) > 1 and row[1] == "✅":
             continue  # Уже уведомлён
-
-        user_id = None
-        manager_code = None
-        signature = None
-        date = row[2] if len(row) > 2 else ""
-
-        for track_row in tracking_records[1:]:
-            if track == track_row[0].strip().lower():
-                user_id = track_row[4]
-                manager_code = track_row[2]
-                signature = track_row[3]
-                break
-
-        if user_id:
-            notifications.append({
-                "row_index": i + 1,  # для обновления
-                "track": track.upper(),
-                "user_id": user_id,
-                "manager_code": manager_code,
-                "signature": signature,
-                "date": date
-            })
-
-    count = len(notifications)
-    if count == 0:
-        await message.answer("📭 Новых уведомлений по Китаю не найдено.")
-        return
-
-    await message.answer(f"🔎 Найдено {count} человек для уведомления. Начинаю рассылку...")
-    pending_notifications["china"] = notifications
-    asyncio.create_task(send_china_notifications(message))
-    is_notifying["china"] = True
-
-
-async def send_china_notifications(message: Message):
-    count = 0
-    for item in pending_notifications["china"]:
-        track = item["track"]
-        user_id = item["user_id"]
-        manager_code = item["manager_code"]
-        signature = item["signature"]
-        date = item["date"]
-        row_index = item["row_index"]
-
-        date_text = f" ({date})" if date else ""
-        text = get_text("china_notification", track=track) + date_text
-
-        try:
-            await bot.send_message(user_id, text)
-            logging.info(f"✅ Отправлено пользователю {user_id}: {track}")
-            await asyncio.sleep(0.6)
-        except Exception as e:
-            logging.warning(f"❌ Ошибка при отправке {user_id}: {e}")
-            await asyncio.sleep(1)
-            continue  # переходим к следующему
-
-        # Обновляем таблицу
-        try:
-            china_sheet.update(f"D{row_index}", [[manager_code]])
-            await asyncio.sleep(0.2)
-            china_sheet.update(f"E{row_index}", [[signature]])
-            await asyncio.sleep(0.2)
-            china_sheet.update(f"F{row_index}", [[user_id]])
-            await asyncio.sleep(0.2)
-            china_sheet.update_cell(row_index, 2, "✅")
-            await asyncio.sleep(0.2)
-        except Exception as e:
-            logging.warning(f"⚠️ Ошибка обновления таблицы (строка {row_index}): {e}")
-
-        count += 1
-
-    # Очистка
-    pending_notifications["china"] = []
-    is_notifying["china"] = False
-
-    # Отправляем финальное сообщение админу
-    for admin_id in ADMIN_IDS:
-        try:
-            await bot.send_message(admin_id, f"✅ Рассылка по Китаю завершена. Оповещено {count} человек.")
-        except Exception as e:
-            logging.warning(f"❌ Не удалось отправить отчёт админу {admin_id}: {e}")
-
-
-# 🛡️ Глобальные переменные (если ещё не добавлены)
-is_notifying = is_notifying if 'is_notifying' in globals() else {"china": False, "kz": False}
-pending_notifications = pending_notifications if 'pending_notifications' in globals() else {"china": [], "kz": []}
-
-
-@router.message(F.text == "/check_kz")
-async def check_kz_handler(message: Message):
-    if str(message.from_user.id) not in ADMIN_IDS:
-        await message.answer("❌ У вас нет прав для этой команды!")
-        return
-
-    if is_notifying["kz"]:
-        await message.answer("⚠️ Рассылка по Казахстану уже запущена. Подождите завершения.")
-        return
-
-    kz_records = kz_sheet.get_all_values()
-    tracking_records = tracking_sheet.get_all_values()
-    notifications = []
-
-    for i in range(len(kz_records) - 1, 0, -1):
-        row = kz_records[i]
-        track = row[0].strip().lower()
-
-        if not track:
-            continue
-
-        if len(row) > 1 and row[1] == "✅":
-            continue  # уже уведомлён
 
         user_id = None
         manager_code = None
@@ -715,13 +640,141 @@ async def check_kz_handler(message: Message):
 
     count = len(notifications)
     if count == 0:
+        await message.answer("📭 Новых уведомлений по Китаю не найдено.")
+        return
+
+    await message.answer(f"🔎 Найдено {count} человек для уведомления. Начинаю рассылку...")
+    pending_notifications["china"] = notifications
+    is_notifying["china"] = True
+    asyncio.create_task(send_china_notifications(message))  # ⬅️ запускаем рассылку
+
+async def send_china_notifications(message: Message):
+    count = 0
+    sent_cache = set()
+
+    for item in pending_notifications["china"]:
+        track = item["track"]
+        user_id = item["user_id"]
+        manager_code = item["manager_code"]
+        signature = item["signature"]
+        date = item["date"]
+        row_index = item["row_index"]
+
+        # Кеш: защита от повторных отправок
+        cache_key = f"{user_id}:{track}"
+        if cache_key in sent_cache:
+            logging.info(f"⏩ Уже уведомляли: {cache_key}")
+            continue
+        sent_cache.add(cache_key)
+
+        # Формируем текст уведомления
+        date_text = f" ({date})" if date else ""
+        text = get_text("china_notification", track=track) + date_text
+
+        # Отправляем сообщение
+        try:
+            await bot.send_message(user_id, text)
+            logging.info(f"✅ Отправлено пользователю {user_id}: {track}")
+            await asyncio.sleep(0.6)
+        except Exception as e:
+            logging.warning(f"❌ Ошибка при отправке {user_id}: {e}")
+            await asyncio.sleep(1)
+            continue
+
+        # Обновляем таблицу
+        try:
+            china_sheet.update(f"D{row_index}", [[manager_code]])
+            await asyncio.sleep(0.2)
+            china_sheet.update(f"E{row_index}", [[signature]])
+            await asyncio.sleep(0.2)
+            china_sheet.update(f"F{row_index}", [[user_id]])
+            await asyncio.sleep(0.2)
+            china_sheet.update_cell(row_index, 2, "✅")
+            await asyncio.sleep(0.2)
+        except Exception as e:
+            logging.warning(f"⚠️ Ошибка обновления таблицы (строка {row_index}): {e}")
+
+        count += 1
+
+    # Завершение рассылки
+    pending_notifications["china"] = []
+    is_notifying["china"] = False
+
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, f"✅ Рассылка по Китаю завершена. Оповещено {count} человек.")
+        except Exception as e:
+            logging.warning(f"❌ Не удалось отправить отчёт админу {admin_id}: {e}")
+
+
+
+# 🛡️ Глобальные переменные (если ещё не добавлены)
+is_notifying = is_notifying if 'is_notifying' in globals() else {"china": False, "kz": False}
+pending_notifications = pending_notifications if 'pending_notifications' in globals() else {"china": [], "kz": []}
+
+
+@router.message(F.text == "/check_kz")
+async def check_kz_handler(message: Message):
+    if str(message.from_user.id) not in ADMIN_IDS:
+        await message.answer("❌ У вас нет прав для этой команды!")
+        return
+
+    if is_notifying.get("kz"):
+        await message.answer("⚠️ Рассылка по Казахстану уже запущена. Подождите завершения.")
+        return
+
+    kz_records = kz_sheet.get_all_values()
+    tracking_records = tracking_sheet.get_all_values()
+    notifications = []
+    sent_cache = set()
+
+    for i in range(len(kz_records) - 1, 0, -1):
+        row = kz_records[i]
+        track = row[0].strip().lower()
+
+        if not track:
+            continue
+
+        if len(row) > 1 and row[1] == "✅":
+            continue
+
+        user_id = None
+        manager_code = None
+        signature = None
+        date = row[2] if len(row) > 2 else ""
+
+        for track_row in tracking_records[1:]:
+            if track == track_row[0].strip().lower():
+                user_id = track_row[4]
+                manager_code = track_row[2]
+                signature = track_row[3]
+                break
+
+        if user_id:
+            cache_key = f"{user_id}:{track}"
+            if cache_key in sent_cache:
+                continue
+            sent_cache.add(cache_key)
+
+            notifications.append({
+                "row_index": i + 1,
+                "track": track.upper(),
+                "user_id": user_id,
+                "manager_code": manager_code,
+                "signature": signature,
+                "date": date
+            })
+
+    count = len(notifications)
+    if count == 0:
         await message.answer("📭 Новых уведомлений по Казахстану не найдено.")
         return
 
     await message.answer(f"🔎 Найдено {count} человек для уведомления. Начинаю рассылку...")
+
     pending_notifications["kz"] = notifications
-    asyncio.create_task(send_kz_notifications(message))
     is_notifying["kz"] = True
+    asyncio.create_task(send_kz_notifications(message))
 
 
 async def send_kz_notifications(message: Message):
@@ -877,35 +930,35 @@ async def update_texts_handler(message: Message):
     load_texts()  # Загружаем тексты заново из Google Sheets
     await message.answer("✅ Тексты обновлены!")
     
+from aiogram.exceptions import TelegramForbiddenError
+from aiogram.dispatcher.error_handlers import ErrorHandler
+
+class GlobalErrorHandler(ErrorHandler):
+    async def handle(self, update, exception):
+        user_id = update.from_user.id if update.from_user else "неизвестно"
+
+        if isinstance(exception, TelegramForbiddenError):
+            logging.warning(f"⚠️ Пользователь заблокировал бота — {user_id}")
+            return True  # Подавляем ошибку
+
+        logging.exception(f"🔥 Глобальная ошибка у пользователя {user_id}: {exception}")
+
+        try:
+            if hasattr(update, "answer"):
+                await update.answer("❌ Произошла ошибка, но бот продолжает работать.")
+        except Exception as e:
+            logging.warning(f"❌ Не удалось отправить сообщение об ошибке: {e}")
+
+        return True  # Подавляем ошибку
+
 async def main():
-    logging.basicConfig(level=logging.INFO)
     load_texts()
     await set_bot_commands()
     await bot.delete_webhook(drop_pending_updates=True)
+
+    # ✅ Подключаем глобальный обработчик ошибок
+    dp.errors.register(GlobalErrorHandler())
+
     logging.info("✅ Бот успешно запущен и готов к работе!")
     await dp.start_polling(bot)
 
-
-if __name__ == "__main__":
-    asyncio.run(main())
-
-@dp.errors()
-async def global_error_handler(event, exception):
-    from aiogram.exceptions import TelegramForbiddenError
-
-    # Если это ошибка отправки сообщения (например, пользователь заблокировал бота)
-    if isinstance(exception, TelegramForbiddenError):
-        logging.warning(f"⚠️ Пользователь заблокировал бота — {event.from_user.id}")
-        return True  # подавляем ошибку
-
-    # Логируем другие ошибки
-    logging.exception(f"🔥 Глобальная ошибка: {exception}")
-
-    # Пытаемся уведомить пользователя (если это message-объект)
-    try:
-        if hasattr(event, "answer"):
-            await event.answer("❌ Произошла ошибка, но бот продолжает работать.")
-    except Exception as e:
-        logging.warning(f"❌ Не удалось отправить сообщение об ошибке: {e}")
-
-    return True  # Не передаём ошибку дальше, чтобы бот не упал
