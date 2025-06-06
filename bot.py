@@ -559,58 +559,112 @@ async def check_issued_handler(message: Message):
 # Эта строка должна быть вне всех циклов
     await message.answer(f"✅ Обновлено {updated_count} треков. Теперь они отображаются как 'Выдано'.")
 
+# 🛡 Глобальные переменные для контроля
+is_notifying = {"china": False}
+pending_notifications = {"china": []}
+
+
 @router.message(F.text == "/check_china")
 async def check_china_handler(message: Message):
     if str(message.from_user.id) not in ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
 
+    if is_notifying["china"]:
+        await message.answer("⚠️ Рассылка по Китаю уже запущена, подождите окончания.")
+        return
+
     china_records = china_sheet.get_all_values()
     tracking_records = tracking_sheet.get_all_values()
-    found = 0
+    notifications = []
 
+    # Собираем уведомления
     for i in range(len(china_records) - 1, 0, -1):
-        china_row = china_records[i]
-        china_track = china_row[0].strip().lower()
+        row = china_records[i]
+        track = row[0].strip().lower()
 
-        if not china_track:
+        if not track:
             continue
 
-        if len(china_row) > 1 and china_row[1] == "✅":
-            break
+        if len(row) > 1 and row[1] == "✅":
+            continue  # Уже уведомлён
 
         user_id = None
         manager_code = None
         signature = None
-        date = china_row[2] if len(china_row) > 2 else None  # Берём дату, если есть
+        date = row[2] if len(row) > 2 else ""
 
-        # Ищем владельца трека в "Трекинг"
         for track_row in tracking_records[1:]:
-            if china_track == track_row[0].strip().lower():
-                user_id = track_row[4]  # ID Telegram клиента
-                manager_code = track_row[2]  # Код менеджера
-                signature = track_row[3]  # Подпись
+            if track == track_row[0].strip().lower():
+                user_id = track_row[4]
+                manager_code = track_row[2]
+                signature = track_row[3]
                 break
 
         if user_id:
-            date_text = f" ({date})" if date else ""
-            message_text = get_text("china_notification", track=china_track.upper()) + date_text
-            await bot.send_message(user_id, message_text)
-            await asyncio.sleep(0.1)
+            notifications.append({
+                "row_index": i + 1,  # для обновления
+                "track": track.upper(),
+                "user_id": user_id,
+                "manager_code": manager_code,
+                "signature": signature,
+                "date": date
+            })
 
-            china_sheet.update(f"D{i + 1}", [[manager_code]])
-            await asyncio.sleep(0.1)
+    count = len(notifications)
+    if count == 0:
+        await message.answer("📭 Новых уведомлений по Китаю не найдено.")
+        return
 
-            china_sheet.update(f"E{i + 1}", [[signature]])
-            await asyncio.sleep(0.1)
+    await message.answer(f"🔎 Найдено {count} человек для уведомления. Начинаю рассылку...")
+    pending_notifications["china"] = notifications
+    asyncio.create_task(send_china_notifications(message))
+    is_notifying["china"] = True
 
-            china_sheet.update(f"F{i + 1}", [[user_id]])
-            await asyncio.sleep(0.1)
 
-            china_sheet.update_cell(i + 1, 2, "✅")
-            await asyncio.sleep(0.1)
+async def send_china_notifications(message: Message):
+    count = 0
+    for item in pending_notifications["china"]:
+        track = item["track"]
+        user_id = item["user_id"]
+        manager_code = item["manager_code"]
+        signature = item["signature"]
+        date = item["date"]
+        row_index = item["row_index"]
 
-    await message.answer(f"✅ Отправлено {found} уведомлений! Заполнены столбцы.")
+        date_text = f" ({date})" if date else ""
+        try:
+            await bot.send_message(user_id, get_text("china_notification", track=track) + date_text)
+            await asyncio.sleep(0.6)  # не нагружаем Telegram
+
+            # Обновляем таблицу (с паузами)
+            try:
+                china_sheet.update(f"D{row_index}", [[manager_code]])
+                await asyncio.sleep(0.2)
+                china_sheet.update(f"E{row_index}", [[signature]])
+                await asyncio.sleep(0.2)
+                china_sheet.update(f"F{row_index}", [[user_id]])
+                await asyncio.sleep(0.2)
+                china_sheet.update_cell(row_index, 2, "✅")
+                await asyncio.sleep(0.2)
+            except Exception as e:
+                logging.warning(f"⚠️ Ошибка обновления строки {row_index}: {e}")
+
+            count += 1
+        except Exception as e:
+            logging.warning(f"⚠️ Не удалось отправить сообщение пользователю {user_id}: {e}")
+            await asyncio.sleep(1)
+
+    # Очистка
+    pending_notifications["china"] = []
+    is_notifying["china"] = False
+
+    # Сообщаем админу
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, f"✅ Рассылка по Китаю завершена. Оповещено {count} человек.")
+        except:
+            pass
 
 
 @router.message(F.text == "/check_kz")
