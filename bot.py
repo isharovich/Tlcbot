@@ -14,6 +14,10 @@ import json
 from collections import defaultdict, deque
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
 
 # ==========================
 # 🔹 Настройки бота и таблицы
