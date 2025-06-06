@@ -528,17 +528,35 @@ async def check_issued_handler(message: Message):
                 signature = track_row[3]  # Подпись
 
                 # Обновляем "Код менеджера", "Подпись" и "ID Телеграма" в "Выданное"
-                issued_sheet.update(f"D{i + 1}", [[manager_code]])  # Код менеджера
-                issued_sheet.update(f"E{i + 1}", [[signature]])  # Подпись
-                issued_sheet.update(f"F{i + 1}", [[user_id]])  # ID Телеграма
+                try:
+                    issued_sheet.update(f"D{i + 1}", [[manager_code]])  # Код менеджера
+                except:
+                    pass
 
-                # Меняем статус в "Трекинг" на "Выдано"
-                tracking_sheet.update_cell(j, 2, "Выдано")
+                try:
+                    issued_sheet.update(f"E{i + 1}", [[signature]])  # Подпись
+                except:
+                    pass
 
-                issued_sheet.update_cell(i + 1, 2, "✅")  # Помечаем, что статус обновлён
+                try:
+                    issued_sheet.update(f"F{i + 1}", [[user_id]])  # ID Телеграма
+                except:
+                    pass
+
+                try:
+                    tracking_sheet.update_cell(j, 2, "Выдано")
+                except:
+                    pass
+
+                try:
+                    issued_sheet.update_cell(i + 1, 2, "✅")  # Отметка, что выдано
+                except:
+                    pass
+
                 updated_count += 1
                 break  # Нашли – обновили – выходим
 
+# Эта строка должна быть вне всех циклов
     await message.answer(f"✅ Обновлено {updated_count} треков. Теперь они отображаются как 'Выдано'.")
 
 @router.message(F.text == "/check_china")
