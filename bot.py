@@ -930,7 +930,6 @@ async def update_texts_handler(message: Message):
     await message.answer("✅ Тексты обновлены!")
     
 from aiogram.exceptions import TelegramForbiddenError
-from aiogram.dispatcher.error_handlers import ErrorHandler
 
 class GlobalErrorHandler(ErrorHandler):
     async def handle(self, update, exception):
