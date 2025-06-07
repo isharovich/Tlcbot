@@ -713,7 +713,6 @@ is_notifying = is_notifying if 'is_notifying' in globals() else {"china": False,
 pending_notifications = pending_notifications if 'pending_notifications' in globals() else {"china": [], "kz": []}
 
 
-# ✅ ЭТАП 1: Подготовка уведомлений и обновление таблицы
 @router.message(F.text == "/check_kz")
 async def prepare_check_kz(message: Message):
     if str(message.from_user.id) not in ADMIN_IDS:
@@ -787,44 +786,8 @@ async def prepare_check_kz(message: Message):
         json.dump(notifications, f)
 
     await message.answer(f"✅ Найдено {len(notifications)} человек. Таблица обновлена. Рассылка скоро начнётся...")
-
-
-# ✅ ЭТАП 2: Рассылка уведомлений (в тесте — только админам)
-async def process_kz_notifications():
-    if not os.path.exists("pending_kz.json"):
-        return
-
-    with open("pending_kz.json", "r") as f:
-        notifications = json.load(f)
-
-    count = 0
-    for item in notifications:
-        track = item["track"]
-        user_id = item["user_id"]
-        manager_code = item["manager_code"]
-        signature = item["signature"]
-        date = item["date"]
-        date_text = f" ({date})" if date else ""
-
-        text = get_text("kz_notification", track=track) + date_text
-
-        for admin_id in ADMIN_IDS:
-            try:
-                await bot.send_message(admin_id, f"[ТЕСТ] {text}")
-                with open("kz_notifications.log", "a") as log_file:
-                    log_file.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ {track} → {user_id}\n")
-            except Exception as e:
-                logging.warning(f"❌ Не удалось отправить админу {admin_id}: {e}")
-            await asyncio.sleep(0.6)
-
-        count += 1
-
-    os.remove("pending_kz.json")
-    for admin_id in ADMIN_IDS:
-        try:
-            await bot.send_message(admin_id, f"✅ Тестовая рассылка завершена. Уведомлений: {count}")
-        except:
-            pass
+    logging.info(f"🔄 pending_kz.json сохранён. Запуск фоновой рассылки.")
+    asyncio.create_task(process_kz_notifications())  # 🔥 вот оно — запускает рассылку!
 
     
 # ✅ Отмена
