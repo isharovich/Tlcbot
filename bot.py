@@ -17,9 +17,6 @@ from aiogram.exceptions import RetryAfter
 
 from logging.handlers import RotatingFileHandler
 
-# 🛡️ Глобальные переменные (если ещё не добавлены)
-is_notifying = is_notifying if 'is_notifying' in globals() else {"china": False, "kz": False}
-pending_notifications = pending_notifications if 'pending_notifications' in globals() else {"china": [], "kz": []}
 
 # 🔧 Настройка логирования с ротацией
 log_handler = RotatingFileHandler(
