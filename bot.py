@@ -774,10 +774,10 @@ async def check_kz_handler(message: Message):
 
     pending_notifications["kz"] = notifications
     is_notifying["kz"] = True
-    asyncio.create_task(send_kz_notifications(message))
+    asyncio.create_task(send_kz_notifications_test())
 
 
-async def send_kz_notifications(message: Message):
+async def send_kz_notifications_test():
     count = 0
     for item in pending_notifications["kz"]:
         track = item["track"]
@@ -791,11 +791,13 @@ async def send_kz_notifications(message: Message):
         text = get_text("kz_notification", track=track) + date_text
 
         try:
-            await bot.send_message(user_id, text)
-            logging.info(f"✅ Отправлено пользователю {user_id}: {track}")
+            # ТЕСТОВАЯ ОТПРАВКА — ТОЛЬКО АДМИНАМ
+            for admin_id in ADMIN_IDS:
+                await bot.send_message(admin_id, f"ТЕСТ {track}: {text}")
+            logging.info(f"✅ Тестовое уведомление вместо {user_id}: {track}")
             await asyncio.sleep(0.6)
         except Exception as e:
-            logging.warning(f"❌ Ошибка при отправке {user_id}: {e}")
+            logging.warning(f"❌ Ошибка при тестовой отправке {user_id}: {e}")
             await asyncio.sleep(1)
             continue
 
@@ -806,7 +808,7 @@ async def send_kz_notifications(message: Message):
             await asyncio.sleep(0.2)
             kz_sheet.update(f"F{row_index}", [[user_id]])
             await asyncio.sleep(0.2)
-            kz_sheet.update_cell(row_index, 2, "✅")
+            kz_sheet.update_cell(row_index, 2, "🟨")  # Жёлтый квадрат вместо галочки
             await asyncio.sleep(0.2)
         except Exception as e:
             logging.warning(f"⚠️ Ошибка обновления таблицы (строка {row_index}): {e}")
@@ -818,10 +820,9 @@ async def send_kz_notifications(message: Message):
 
     for admin_id in ADMIN_IDS:
         try:
-            await bot.send_message(admin_id, f"✅ Рассылка по Казахстану завершена. Оповещено {count} человек.")
+            await bot.send_message(admin_id, f"✅ Тестовая рассылка по Казахстану завершена. Сообщений: {count}")
         except Exception as e:
             logging.warning(f"❌ Не удалось отправить отчёт админу {admin_id}: {e}")
-
     
     
 # ✅ Отмена
