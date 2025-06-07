@@ -713,29 +713,29 @@ is_notifying = is_notifying if 'is_notifying' in globals() else {"china": False,
 pending_notifications = pending_notifications if 'pending_notifications' in globals() else {"china": [], "kz": []}
 
 
+# ✅ ЭТАП 1: Подготовка уведомлений и обновление таблицы
 @router.message(F.text == "/check_kz")
-async def check_kz_handler(message: Message):
+async def prepare_check_kz(message: Message):
     if str(message.from_user.id) not in ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
 
-    if is_notifying.get("kz"):
-        await message.answer("⚠️ Рассылка по Казахстану уже запущена. Подождите завершения.")
+    if os.path.exists("pending_kz.json"):
+        await message.answer("⚠️ Предыдущая рассылка ещё не завершена!")
         return
 
     kz_records = kz_sheet.get_all_values()
     tracking_records = tracking_sheet.get_all_values()
     notifications = []
+    updates = []
     sent_cache = set()
 
     for i in range(len(kz_records) - 1, 0, -1):
         row = kz_records[i]
         track = row[0].strip().lower()
-
         if not track:
             continue
-
-        if len(row) > 1 and row[1] == "✅":
+        if len(row) > 1 and row[1] in ["✅", "🟨"]:
             continue
 
         user_id = None
@@ -765,65 +765,67 @@ async def check_kz_handler(message: Message):
                 "date": date
             })
 
-    count = len(notifications)
-    if count == 0:
+            updates.extend([
+                {"range": f"D{i+1}", "values": [[manager_code]]},
+                {"range": f"E{i+1}", "values": [[signature]]},
+                {"range": f"F{i+1}", "values": [[user_id]]},
+                {"range": f"B{i+1}", "values": [["🟨"]]}
+            ])
+
+    if not notifications:
         await message.answer("📭 Новых уведомлений по Казахстану не найдено.")
         return
 
-    await message.answer(f"🔎 Найдено {count} человек для уведомления. Начинаю рассылку...")
+    try:
+        kz_sheet.batch_update(updates)
+    except Exception as e:
+        logging.warning(f"Ошибка обновления таблицы: {e}")
+        await message.answer("⚠️ Ошибка при обновлении таблицы!")
+        return
 
-    pending_notifications["kz"] = notifications
-    is_notifying["kz"] = True
-    asyncio.create_task(send_kz_notifications_test())
+    with open("pending_kz.json", "w") as f:
+        json.dump(notifications, f)
+
+    await message.answer(f"✅ Найдено {len(notifications)} человек. Таблица обновлена. Рассылка скоро начнётся...")
 
 
-async def send_kz_notifications_test():
+# ✅ ЭТАП 2: Рассылка уведомлений (в тесте — только админам)
+async def process_kz_notifications():
+    if not os.path.exists("pending_kz.json"):
+        return
+
+    with open("pending_kz.json", "r") as f:
+        notifications = json.load(f)
+
     count = 0
-    for item in pending_notifications["kz"]:
+    for item in notifications:
         track = item["track"]
         user_id = item["user_id"]
         manager_code = item["manager_code"]
         signature = item["signature"]
         date = item["date"]
-        row_index = item["row_index"]
-
         date_text = f" ({date})" if date else ""
+
         text = get_text("kz_notification", track=track) + date_text
 
-        try:
-            # ТЕСТОВАЯ ОТПРАВКА — ТОЛЬКО АДМИНАМ
-            for admin_id in ADMIN_IDS:
-                await bot.send_message(admin_id, f"ТЕСТ {track}: {text}")
-            logging.info(f"✅ Тестовое уведомление вместо {user_id}: {track}")
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, f"[ТЕСТ] {text}")
+                with open("kz_notifications.log", "a") as log_file:
+                    log_file.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ {track} → {user_id}\n")
+            except Exception as e:
+                logging.warning(f"❌ Не удалось отправить админу {admin_id}: {e}")
             await asyncio.sleep(0.6)
-        except Exception as e:
-            logging.warning(f"❌ Ошибка при тестовой отправке {user_id}: {e}")
-            await asyncio.sleep(1)
-            continue
-
-        try:
-            kz_sheet.update(f"D{row_index}", [[manager_code]])
-            await asyncio.sleep(0.2)
-            kz_sheet.update(f"E{row_index}", [[signature]])
-            await asyncio.sleep(0.2)
-            kz_sheet.update(f"F{row_index}", [[user_id]])
-            await asyncio.sleep(0.2)
-            kz_sheet.update_cell(row_index, 2, "🟨")  # Жёлтый квадрат вместо галочки
-            await asyncio.sleep(0.2)
-        except Exception as e:
-            logging.warning(f"⚠️ Ошибка обновления таблицы (строка {row_index}): {e}")
 
         count += 1
 
-    pending_notifications["kz"] = []
-    is_notifying["kz"] = False
-
+    os.remove("pending_kz.json")
     for admin_id in ADMIN_IDS:
         try:
-            await bot.send_message(admin_id, f"✅ Тестовая рассылка по Казахстану завершена. Сообщений: {count}")
-        except Exception as e:
-            logging.warning(f"❌ Не удалось отправить отчёт админу {admin_id}: {e}")
-    
+            await bot.send_message(admin_id, f"✅ Тестовая рассылка завершена. Уведомлений: {count}")
+        except:
+            pass
+
     
 # ✅ Отмена
 @router.message(F.text.lower().in_(["отмена", "/cancel", "/отмена"]))
