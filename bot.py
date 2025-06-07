@@ -706,20 +706,13 @@ async def check_china_handler(message: Message):
     await message.answer(f"✅ Китай: найдено {len(notif)} человек. Рассылка началась...")
     asyncio.create_task(send_china_notifications())
 
-# ✅ Отправка уведомлений по ВЫДАННЫМ
-async def send_issued_notifications():
+# ✅ Обновление статуса по ВЫДАННЫМ (без уведомлений)
+async def send_issued_updates():
     filename = "pending_issued.json"
     if not os.path.exists(filename): return
     with open(filename, "r") as f: notifications = json.load(f)
     count = 0
     for item in notifications:
-        text = get_text("issued_notification", track=item["track"])
-        try:
-            await bot.send_message(item["user_id"], text)
-            await asyncio.sleep(0.6)
-        except Exception as e:
-            logging.warning(f"ISS ❌ Ошибка при отправке {item['user_id']}: {e}")
-            continue
         try:
             issued_sheet.update(f"D{item['row_index']}", [[item['manager_code']]])
             await asyncio.sleep(0.2)
@@ -734,7 +727,7 @@ async def send_issued_notifications():
         count += 1
     os.remove(filename)
     for admin_id in ADMIN_IDS:
-        await bot.send_message(admin_id, f"✅ ISSUED: Оповещено {count} человек.")
+        await bot.send_message(admin_id, f"✅ ISSUED: Обновлено {count} строк без рассылки сообщений.")
 
 @router.message(Command("check_issued"))
 async def check_issued_handler(message: Message):
@@ -742,7 +735,7 @@ async def check_issued_handler(message: Message):
         await message.answer("❌ У вас нет прав для этой команды!")
         return
     if os.path.exists("pending_issued.json"):
-        await message.answer("⚠️ Предыдущая рассылка ещё не завершена!")
+        await message.answer("⚠️ Предыдущая обработка ещё не завершена!")
         return
     records = issued_sheet.get_all_values()
     tracking = tracking_sheet.get_all_values()
@@ -758,11 +751,16 @@ async def check_issued_handler(message: Message):
             key = f"{user_id}:{track}"
             if key in cache: continue
             cache.add(key)
-            notif.append({"row_index": i+1, "track": track.upper(), "user_id": user_id,
-                          "manager_code": manager_code, "signature": signature})
+            notif.append({
+                "row_index": i+1,
+                "track": track.upper(),
+                "user_id": user_id,
+                "manager_code": manager_code,
+                "signature": signature
+            })
             updates.append({"range": f"B{i+1}", "values": [["✅"]]})
     if not notif:
-        await message.answer("📭 Новых уведомлений в 'Выданное' не найдено.")
+        await message.answer("📭 Новых записей в 'Выданное' не найдено.")
         return
     try:
         issued_sheet.batch_update(updates)
@@ -771,8 +769,8 @@ async def check_issued_handler(message: Message):
         await message.answer("⚠️ Ошибка при обновлении таблицы!")
         return
     with open("pending_issued.json", "w") as f: json.dump(notif, f)
-    await message.answer(f"✅ Выданное: найдено {len(notif)} человек. Рассылка началась...")
-    asyncio.create_task(send_issued_notifications())
+    await message.answer(f"✅ Выданное: найдено {len(notif)} строк. Обновление таблицы началось...")
+    asyncio.create_task(send_issued_updates())
 
     
 # ✅ Отмена
