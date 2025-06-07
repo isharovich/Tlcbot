@@ -13,6 +13,7 @@ import os
 import json
 from collections import defaultdict, deque
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 
 
 from logging.handlers import RotatingFileHandler
