@@ -718,6 +718,11 @@ async def check_kz_handler(message: Message):
     if str(message.from_user.id) not in ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
+    
+     # ✅ Безопасная инициализация, если словари сброшены
+    is_notifying.setdefault("kz", False)
+    pending_notifications.setdefault("kz", [])
+
 
     if is_notifying.get("kz"):
         await message.answer("⚠️ Рассылка по Казахстану уже запущена. Подождите завершения.")
