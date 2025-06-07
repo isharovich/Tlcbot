@@ -761,7 +761,10 @@ async def process_kz_notifications():
 
 
 # ✅ ЭТАП 1: Подготовка уведомлений по Казахстану
-async def prepare_check_kz(message):
+@router.message(Command("check_kz"))
+async def prepare_check_kz(message: Message):
+    logging.info(f"📥 Получена команда /check_kz от {message.from_user.id}")
+
     if str(message.from_user.id) not in ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
@@ -835,7 +838,6 @@ async def prepare_check_kz(message):
     await message.answer(f"✅ Найдено {len(notifications)} человек. Таблица обновлена. Рассылка скоро начнётся...")
     logging.info("🔄 Запускаем рассылку по Казахстану...")
     asyncio.create_task(process_kz_notifications())
-
     
 # ✅ Отмена
 @router.message(F.text.lower().in_(["отмена", "/cancel", "/отмена"]))
