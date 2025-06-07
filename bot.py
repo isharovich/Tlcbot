@@ -17,6 +17,10 @@ from aiogram.exceptions import RetryAfter
 
 from logging.handlers import RotatingFileHandler
 
+# 🛡️ Глобальные переменные (если ещё не добавлены)
+is_notifying = is_notifying if 'is_notifying' in globals() else {"china": False, "kz": False}
+pending_notifications = pending_notifications if 'pending_notifications' in globals() else {"china": [], "kz": []}
+
 # 🔧 Настройка логирования с ротацией
 log_handler = RotatingFileHandler(
     filename="bot.log",       # основной файл логов
@@ -708,21 +712,12 @@ async def send_china_notifications(message: Message):
 
 
 
-# 🛡️ Глобальные переменные (если ещё не добавлены)
-is_notifying = is_notifying if 'is_notifying' in globals() else {"china": False, "kz": False}
-pending_notifications = pending_notifications if 'pending_notifications' in globals() else {"china": [], "kz": []}
-
-
 @router.message(F.text == "/check_kz")
 async def check_kz_handler(message: Message):
     if str(message.from_user.id) not in ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
     
-     # ✅ Безопасная инициализация, если словари сброшены
-    is_notifying.setdefault("kz", False)
-    pending_notifications.setdefault("kz", [])
-
 
     if is_notifying.get("kz"):
         await message.answer("⚠️ Рассылка по Казахстану уже запущена. Подождите завершения.")
