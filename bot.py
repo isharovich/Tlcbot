@@ -930,35 +930,16 @@ async def update_texts_handler(message: Message):
     load_texts()  # Загружаем тексты заново из Google Sheets
     await message.answer("✅ Тексты обновлены!")
     
-from aiogram.exceptions import TelegramForbiddenError
-from aiogram.dispatcher.error_handlers import ErrorHandler
 
-class GlobalErrorHandler(ErrorHandler):
-    async def handle(self, update, exception):
-        user_id = update.from_user.id if update.from_user else "неизвестно"
-
-        if isinstance(exception, TelegramForbiddenError):
-            logging.warning(f"⚠️ Пользователь заблокировал бота — {user_id}")
-            return True  # Подавляем ошибку
-
-        logging.exception(f"🔥 Глобальная ошибка у пользователя {user_id}: {exception}")
-
-        try:
-            if hasattr(update, "answer"):
-                await update.answer("❌ Произошла ошибка, но бот продолжает работать.")
-        except Exception as e:
-            logging.warning(f"❌ Не удалось отправить сообщение об ошибке: {e}")
-
-        return True  # Подавляем ошибку
 
 async def main():
     load_texts()
     await set_bot_commands()
     await bot.delete_webhook(drop_pending_updates=True)
-
-    # ✅ Подключаем глобальный обработчик ошибок
-    dp.errors.register(GlobalErrorHandler())
-
     logging.info("✅ Бот успешно запущен и готов к работе!")
     await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
 
