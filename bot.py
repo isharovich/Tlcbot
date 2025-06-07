@@ -93,6 +93,10 @@ class TrackManagement(StatesGroup):
 class FindTrackFSM(StatesGroup):
     waiting_suffix = State()
 
+class FindByCodeFSM(StatesGroup):
+    waiting_code = State()
+
+
 
 
 # ==========================
@@ -1197,4 +1201,5 @@ async def main():
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
+
 
