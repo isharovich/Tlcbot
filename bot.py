@@ -713,8 +713,55 @@ is_notifying = is_notifying if 'is_notifying' in globals() else {"china": False,
 pending_notifications = pending_notifications if 'pending_notifications' in globals() else {"china": [], "kz": []}
 
 
-@router.message(F.text == "/check_kz")
-async def prepare_check_kz(message: Message):
+# ✅ ЭТАП 2: Рассылка уведомлений по KZ (тестовая, только админам)
+async def process_kz_notifications():
+    logging.info("▶️ process_kz_notifications запущен")
+
+    if not os.path.exists("pending_kz.json"):
+        logging.warning("⛔ Файл pending_kz.json не найден. Прерывание.")
+        return
+
+    with open("pending_kz.json", "r") as f:
+        notifications = json.load(f)
+
+    logging.info(f"📤 Уведомлений в JSON: {len(notifications)}")
+
+    count = 0
+    for item in notifications:
+        track = item["track"]
+        user_id = item["user_id"]
+        manager_code = item["manager_code"]
+        signature = item["signature"]
+        date = item["date"]
+        date_text = f" ({date})" if date else ""
+        text = get_text("kz_notification", track=track) + date_text
+
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, f"[ТЕСТ] {text}")
+                with open("kz_notifications.log", "a") as log_file:
+                    log_file.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ {track} → {user_id}\n")
+            except Exception as e:
+                logging.warning(f"❌ Не удалось отправить админу {admin_id}: {e}")
+            await asyncio.sleep(0.6)
+
+        count += 1
+
+    try:
+        os.remove("pending_kz.json")
+        logging.info("🧹 Файл pending_kz.json удалён после рассылки")
+    except Exception as e:
+        logging.warning(f"❌ Ошибка при удалении pending_kz.json: {e}")
+
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, f"✅ Тестовая рассылка завершена. Уведомлений: {count}")
+        except Exception as e:
+            logging.warning(f"⚠️ Не удалось отправить финальное сообщение админу {admin_id}: {e}")
+
+
+# ✅ ЭТАП 1: Подготовка уведомлений по Казахстану
+async def prepare_check_kz(message):
     if str(message.from_user.id) not in ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
@@ -786,8 +833,8 @@ async def prepare_check_kz(message: Message):
         json.dump(notifications, f)
 
     await message.answer(f"✅ Найдено {len(notifications)} человек. Таблица обновлена. Рассылка скоро начнётся...")
-    logging.info(f"🔄 pending_kz.json сохранён. Запуск фоновой рассылки.")
-    asyncio.create_task(process_kz_notifications())  # 🔥 вот оно — запускает рассылку!
+    logging.info("🔄 Запускаем рассылку по Казахстану...")
+    asyncio.create_task(process_kz_notifications())
 
     
 # ✅ Отмена
