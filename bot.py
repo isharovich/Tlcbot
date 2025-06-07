@@ -931,23 +931,7 @@ async def update_texts_handler(message: Message):
     
 from aiogram.exceptions import TelegramForbiddenError
 
-class GlobalErrorHandler(ErrorHandler):
-    async def handle(self, update, exception):
-        user_id = update.from_user.id if update.from_user else "неизвестно"
 
-        if isinstance(exception, TelegramForbiddenError):
-            logging.warning(f"⚠️ Пользователь заблокировал бота — {user_id}")
-            return True  # Подавляем ошибку
-
-        logging.exception(f"🔥 Глобальная ошибка у пользователя {user_id}: {exception}")
-
-        try:
-            if hasattr(update, "answer"):
-                await update.answer("❌ Произошла ошибка, но бот продолжает работать.")
-        except Exception as e:
-            logging.warning(f"❌ Не удалось отправить сообщение об ошибке: {e}")
-
-        return True  # Подавляем ошибку
 
 async def main():
     load_texts()
