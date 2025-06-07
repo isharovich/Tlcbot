@@ -13,7 +13,7 @@ import os
 import json
 from collections import defaultdict, deque
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
-from aiogram.exceptions import RetryAfter
+
 
 from logging.handlers import RotatingFileHandler
 
