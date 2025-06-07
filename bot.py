@@ -519,33 +519,49 @@ is_notifying = is_notifying if 'is_notifying' in globals() else {"china": False,
 pending_notifications = pending_notifications if 'pending_notifications' in globals() else {"china": [], "kz": []}
 
 
-# ✅ Отправка уведомлений по КАЗАХСТАНУ
+# ✅ Отправка уведомлений по КАЗАХСТАНУ — сначала batch-обновление, потом уведомления
 async def send_kz_notifications():
     filename = "pending_kz.json"
     if not os.path.exists(filename): return
-    with open(filename, "r") as f: notifications = json.load(f)
+
+    with open(filename, "r") as f:
+        notifications = json.load(f)
+
+    updates = []
+    to_notify = []
     count = 0
+
     for item in notifications:
-        text = get_text("kz_notification", track=item["track"]) + (f" ({item['date']})" if item.get("date") else "")
+        row = item["row_index"]
+        updates.append({"range": f"D{row}", "values": [[item["manager_code"]]]})
+        updates.append({"range": f"E{row}", "values": [[item["signature"]]]})
+        updates.append({"range": f"F{row}", "values": [[item["user_id"]]]})
+        updates.append({"range": f"B{row}", "values": [["✅"]]})
+
+        to_notify.append({
+            "user_id": item["user_id"],
+            "text": get_text("kz_notification", track=item["track"]) + (f" ({item['date']})" if item.get("date") else "")
+        })
+
+    # 🔧 Сначала записываем все данные в таблицу
+    try:
+        kz_sheet.batch_update(updates)
+    except Exception as e:
+        logging.warning(f"KZ ⚠️ Ошибка при batch-обновлении таблицы: {e}")
+        return  # Не продолжаем, если запись не удалась
+
+    # 📨 Потом шлём уведомления
+    for item in to_notify:
         try:
-            await bot.send_message(item["user_id"], text)
+            await bot.send_message(item["user_id"], item["text"])
             await asyncio.sleep(0.6)
+            count += 1
         except Exception as e:
             logging.warning(f"KZ ❌ Ошибка при отправке {item['user_id']}: {e}")
             continue
-        try:
-            kz_sheet.update(f"D{item['row_index']}", [[item['manager_code']]])
-            await asyncio.sleep(0.2)
-            kz_sheet.update(f"E{item['row_index']}", [[item['signature']]])
-            await asyncio.sleep(0.2)
-            kz_sheet.update(f"F{item['row_index']}", [[item['user_id']]])
-            await asyncio.sleep(0.2)
-            kz_sheet.update(f"B{item['row_index']}", [["✅"]])
-            await asyncio.sleep(0.2)
-        except Exception as e:
-            logging.warning(f"KZ ⚠️ Ошибка при обновлении таблицы: {e}")
-        count += 1
+
     os.remove(filename)
+
     for admin_id in ADMIN_IDS:
         await bot.send_message(admin_id, f"✅ KZ: Оповещено {count} человек.")
 
@@ -554,88 +570,134 @@ async def check_kz_handler(message: Message):
     if str(message.from_user.id) not in ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
+
     if os.path.exists("pending_kz.json"):
         await message.answer("⚠️ Предыдущая рассылка ещё не завершена!")
         return
+
     records = kz_sheet.get_all_values()
     tracking = tracking_sheet.get_all_values()
     issued_data = issued_sheet.get_all_values()
-    notif, updates, cache = [], [], set()
-    for i in range(len(records) - 1, 0, -1):
-        row = records[i]; track = row[0].strip().lower()
-        if not track or (len(row) > 1 and row[1] in ["✅", "🟨"]): continue
 
-        in_issued = any(track == r[0].strip().lower() for r in issued_data[1:])
-        if in_issued:
-            user_id = manager_code = signature = None
-            for t in tracking[1:]:
-                if track == t[0].strip().lower():
-                    user_id, manager_code, signature = t[4], t[2], t[3]; break
-            try:
-                kz_sheet.update(f"D{i+1}", [[manager_code]])
-                await asyncio.sleep(0.2)
-                kz_sheet.update(f"E{i+1}", [[signature]])
-                await asyncio.sleep(0.2)
-                kz_sheet.update(f"F{i+1}", [[user_id]])
-                await asyncio.sleep(0.2)
-                kz_sheet.update(f"B{i+1}", [["✅"]])
-                await asyncio.sleep(0.2)
-            except Exception as e:
-                logging.warning(f"KZ ⚠️ Ошибка при автозакрытии трека {track.upper()}: {e}")
+    notif = []
+    updates = []
+    auto_updates = []
+    cache = set()
+
+    for i in range(len(records) - 1, 0, -1):
+        row = records[i]
+        track = row[0].strip().lower()
+        if not track or (len(row) > 1 and row[1] in ["✅", "🟨"]):
             continue
 
+        # Проверка: есть ли уже в "Выдано"
+        in_issued = any(track == r[0].strip().lower() for r in issued_data[1:])
         user_id = manager_code = signature = None
-        date = row[2] if len(row) > 2 else ""
+
         for t in tracking[1:]:
             if track == t[0].strip().lower():
-                user_id, manager_code, signature = t[4], t[2], t[3]; break
+                user_id, manager_code, signature = t[4], t[2], t[3]
+                break
+
+        if in_issued:
+            # 🛠 Автоматическое закрытие без уведомлений
+            if user_id:
+                auto_updates += [
+                    {"range": f"D{i+1}", "values": [[manager_code]]},
+                    {"range": f"E{i+1}", "values": [[signature]]},
+                    {"range": f"F{i+1}", "values": [[user_id]]},
+                    {"range": f"B{i+1}", "values": [["✅"]]},
+                ]
+            continue
+
+        # Уведомление
+        date = row[2] if len(row) > 2 else ""
         if user_id:
             key = f"{user_id}:{track}"
-            if key in cache: continue
+            if key in cache:
+                continue
             cache.add(key)
-            notif.append({"row_index": i+1, "track": track.upper(), "user_id": user_id,
-                          "manager_code": manager_code, "signature": signature, "date": date})
+            notif.append({
+                "row_index": i+1,
+                "track": track.upper(),
+                "user_id": user_id,
+                "manager_code": manager_code,
+                "signature": signature,
+                "date": date
+            })
             updates.append({"range": f"B{i+1}", "values": [["✅"]]})
+
+    # ✅ Сначала — автообновление без уведомлений
+    if auto_updates:
+        try:
+            kz_sheet.batch_update(auto_updates)
+            await message.answer(f"✅ Казахстан: автоматически закрыто {len(auto_updates)//4} строк без уведомлений.")
+        except Exception as e:
+            logging.warning(f"KZ ❌ Ошибка при автообновлении: {e}")
+            await message.answer("⚠️ Ошибка при автообновлении таблицы!")
+            return
+
+    # 📦 Потом — уведомления
     if not notif:
         await message.answer("📭 Новых уведомлений по Казахстану не найдено.")
         return
+
     try:
         kz_sheet.batch_update(updates)
     except Exception as e:
         logging.warning(f"KZ Ошибка обновления таблицы: {e}")
         await message.answer("⚠️ Ошибка при обновлении таблицы!")
         return
-    with open("pending_kz.json", "w") as f: json.dump(notif, f)
+
+    with open("pending_kz.json", "w") as f:
+        json.dump(notif, f)
+
     await message.answer(f"✅ Казахстан: найдено {len(notif)} человек. Рассылка началась...")
     asyncio.create_task(send_kz_notifications())
 
-# ✅ Отправка уведомлений по КИТАЮ
+# ✅ Отправка уведомлений по КИТАЮ — сначала batch-обновление, потом сообщения
 async def send_china_notifications():
     filename = "pending_china.json"
     if not os.path.exists(filename): return
-    with open(filename, "r") as f: notifications = json.load(f)
+
+    with open(filename, "r") as f:
+        notifications = json.load(f)
+
+    updates = []
+    to_notify = []
     count = 0
+
     for item in notifications:
-        text = get_text("china_notification", track=item["track"]) + (f" ({item['date']})" if item.get("date") else "")
+        row = item["row_index"]
+        updates.append({"range": f"D{row}", "values": [[item["manager_code"]]]})
+        updates.append({"range": f"E{row}", "values": [[item["signature"]]]})
+        updates.append({"range": f"F{row}", "values": [[item["user_id"]]]})
+        updates.append({"range": f"B{row}", "values": [["✅"]]})
+
+        to_notify.append({
+            "user_id": item["user_id"],
+            "text": get_text("china_notification", track=item["track"]) + (f" ({item['date']})" if item.get("date") else "")
+        })
+
+    # 🔧 Сначала записываем все данные в таблицу
+    try:
+        china_sheet.batch_update(updates)
+    except Exception as e:
+        logging.warning(f"CN ⚠️ Ошибка при batch-обновлении таблицы: {e}")
+        return  # Не продолжаем, если запись не удалась
+
+    # 📨 Потом шлём уведомления
+    for item in to_notify:
         try:
-            await bot.send_message(item["user_id"], text)
+            await bot.send_message(item["user_id"], item["text"])
             await asyncio.sleep(0.6)
+            count += 1
         except Exception as e:
             logging.warning(f"CN ❌ Ошибка при отправке {item['user_id']}: {e}")
             continue
-        try:
-            china_sheet.update(f"D{item['row_index']}", [[item['manager_code']]])
-            await asyncio.sleep(0.2)
-            china_sheet.update(f"E{item['row_index']}", [[item['signature']]])
-            await asyncio.sleep(0.2)
-            china_sheet.update(f"F{item['row_index']}", [[item['user_id']]])
-            await asyncio.sleep(0.2)
-            china_sheet.update(f"B{item['row_index']}", [["✅"]])
-            await asyncio.sleep(0.2)
-        except Exception as e:
-            logging.warning(f"CN ⚠️ Ошибка при обновлении таблицы: {e}")
-        count += 1
+
     os.remove(filename)
+
     for admin_id in ADMIN_IDS:
         await bot.send_message(admin_id, f"✅ CN: Оповещено {count} человек.")
 
@@ -644,88 +706,120 @@ async def check_china_handler(message: Message):
     if str(message.from_user.id) not in ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
+
     if os.path.exists("pending_china.json"):
         await message.answer("⚠️ Предыдущая рассылка ещё не завершена!")
         return
+
     records = china_sheet.get_all_values()
     tracking = tracking_sheet.get_all_values()
     kz_data = kz_sheet.get_all_values()
     issued_data = issued_sheet.get_all_values()
 
-    notif, updates, cache = [], [], set()
+    notif = []
+    updates = []
+    auto_updates = []
+    cache = set()
+
     for i in range(len(records) - 1, 0, -1):
         row = records[i]
         track = row[0].strip().lower()
-        if not track or (len(row) > 1 and row[1] in ["✅", "🟨"]): continue
-
-        in_next_stage = any(track == r[0].strip().lower() for r in kz_data[1:] + issued_data[1:])
-        if in_next_stage:
-            user_id = manager_code = signature = None
-            for t in tracking[1:]:
-                if track == t[0].strip().lower():
-                    user_id, manager_code, signature = t[4], t[2], t[3]
-                    break
-            try:
-                china_sheet.update(f"D{i+1}", [[manager_code]])
-                await asyncio.sleep(0.2)
-                china_sheet.update(f"E{i+1}", [[signature]])
-                await asyncio.sleep(0.2)
-                china_sheet.update(f"F{i+1}", [[user_id]])
-                await asyncio.sleep(0.2)
-                china_sheet.update(f"B{i+1}", [["✅"]])
-                await asyncio.sleep(0.2)
-            except Exception as e:
-                logging.warning(f"CN ⚠️ Ошибка при автозакрытии трека {track.upper()}: {e}")
+        if not track or (len(row) > 1 and row[1] in ["✅", "🟨"]):
             continue
 
+        # Проверяем: уже в КЗ или Выдано?
+        in_next_stage = any(track == r[0].strip().lower() for r in kz_data[1:] + issued_data[1:])
         user_id = manager_code = signature = None
-        date = row[2] if len(row) > 2 else ""
+
         for t in tracking[1:]:
             if track == t[0].strip().lower():
                 user_id, manager_code, signature = t[4], t[2], t[3]
                 break
+
+        if in_next_stage:
+            # ⛔ Автозакрытие без уведомлений
+            if user_id:
+                auto_updates += [
+                    {"range": f"D{i+1}", "values": [[manager_code]]},
+                    {"range": f"E{i+1}", "values": [[signature]]},
+                    {"range": f"F{i+1}", "values": [[user_id]]},
+                    {"range": f"B{i+1}", "values": [["✅"]]},
+                ]
+            continue
+
+        # Если надо уведомить — добавляем в список
+        date = row[2] if len(row) > 2 else ""
         if user_id:
             key = f"{user_id}:{track}"
-            if key in cache: continue
+            if key in cache:
+                continue
             cache.add(key)
-            notif.append({"row_index": i+1, "track": track.upper(), "user_id": user_id,
-                          "manager_code": manager_code, "signature": signature, "date": date})
+
+            notif.append({
+                "row_index": i+1,
+                "track": track.upper(),
+                "user_id": user_id,
+                "manager_code": manager_code,
+                "signature": signature,
+                "date": date
+            })
             updates.append({"range": f"B{i+1}", "values": [["✅"]]})
 
+    # 💥 Сначала batch-обновление автозакрытых
+    if auto_updates:
+        try:
+            china_sheet.batch_update(auto_updates)
+            await message.answer(f"✅ Китай: автоматически закрыто {len(auto_updates)//4} строк без уведомлений.")
+        except Exception as e:
+            logging.warning(f"CN ❌ Ошибка при автообновлении: {e}")
+            await message.answer("⚠️ Ошибка при автообновлении таблицы!")
+            return
+
+    # 📦 Теперь уведомления
     if not notif:
         await message.answer("📭 Новых уведомлений по Китаю не найдено.")
         return
+
     try:
         china_sheet.batch_update(updates)
     except Exception as e:
         logging.warning(f"CN Ошибка обновления таблицы: {e}")
         await message.answer("⚠️ Ошибка при обновлении таблицы!")
         return
+
     with open("pending_china.json", "w") as f:
         json.dump(notif, f)
+
     await message.answer(f"✅ Китай: найдено {len(notif)} человек. Рассылка началась...")
     asyncio.create_task(send_china_notifications())
 
-# ✅ Обновление статуса по ВЫДАННЫМ (без уведомлений)
+# ✅ Обновление статуса по ВЫДАННЫМ — batch-обновление без уведомлений
 async def send_issued_updates():
     filename = "pending_issued.json"
     if not os.path.exists(filename): return
-    with open(filename, "r") as f: notifications = json.load(f)
+
+    with open(filename, "r") as f:
+        notifications = json.load(f)
+
+    updates = []
     count = 0
+
     for item in notifications:
-        try:
-            issued_sheet.update(f"D{item['row_index']}", [[item['manager_code']]])
-            await asyncio.sleep(0.2)
-            issued_sheet.update(f"E{item['row_index']}", [[item['signature']]])
-            await asyncio.sleep(0.2)
-            issued_sheet.update(f"F{item['row_index']}", [[item['user_id']]])
-            await asyncio.sleep(0.2)
-            issued_sheet.update(f"B{item['row_index']}", [["✅"]])
-            await asyncio.sleep(0.2)
-        except Exception as e:
-            logging.warning(f"ISS ⚠️ Ошибка при обновлении таблицы: {e}")
+        row = item["row_index"]
+        updates.append({"range": f"D{row}", "values": [[item["manager_code"]]]})
+        updates.append({"range": f"E{row}", "values": [[item["signature"]]]})
+        updates.append({"range": f"F{row}", "values": [[item["user_id"]]]})
+        updates.append({"range": f"B{row}", "values": [["✅"]]})
         count += 1
+
+    try:
+        issued_sheet.batch_update(updates)
+    except Exception as e:
+        logging.warning(f"ISS ⚠️ Ошибка при batch-обновлении таблицы: {e}")
+        return
+
     os.remove(filename)
+
     for admin_id in ADMIN_IDS:
         await bot.send_message(admin_id, f"✅ ISSUED: Обновлено {count} строк без рассылки сообщений.")
 
@@ -734,22 +828,35 @@ async def check_issued_handler(message: Message):
     if str(message.from_user.id) not in ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
+
     if os.path.exists("pending_issued.json"):
         await message.answer("⚠️ Предыдущая обработка ещё не завершена!")
         return
+
     records = issued_sheet.get_all_values()
     tracking = tracking_sheet.get_all_values()
-    notif, updates, cache = [], [], set()
+
+    notif = []
+    updates = []
+    cache = set()
+
     for i in range(len(records) - 1, 0, -1):
-        row = records[i]; track = row[0].strip().lower()
-        if not track or (len(row) > 1 and row[1] in ["✅", "🟨"]): continue
+        row = records[i]
+        track = row[0].strip().lower()
+        if not track or (len(row) > 1 and row[1] in ["✅", "🟨"]):
+            continue
+
         user_id = manager_code = signature = None
+
         for t in tracking[1:]:
             if track == t[0].strip().lower():
-                user_id, manager_code, signature = t[4], t[2], t[3]; break
+                user_id, manager_code, signature = t[4], t[2], t[3]
+                break
+
         if user_id:
             key = f"{user_id}:{track}"
-            if key in cache: continue
+            if key in cache:
+                continue
             cache.add(key)
             notif.append({
                 "row_index": i+1,
@@ -759,16 +866,21 @@ async def check_issued_handler(message: Message):
                 "signature": signature
             })
             updates.append({"range": f"B{i+1}", "values": [["✅"]]})
+
     if not notif:
         await message.answer("📭 Новых записей в 'Выданное' не найдено.")
         return
+
     try:
         issued_sheet.batch_update(updates)
     except Exception as e:
         logging.warning(f"ISS Ошибка обновления таблицы: {e}")
         await message.answer("⚠️ Ошибка при обновлении таблицы!")
         return
-    with open("pending_issued.json", "w") as f: json.dump(notif, f)
+
+    with open("pending_issued.json", "w") as f:
+        json.dump(notif, f)
+
     await message.answer(f"✅ Выданное: найдено {len(notif)} строк. Обновление таблицы началось...")
     asyncio.create_task(send_issued_updates())
 
