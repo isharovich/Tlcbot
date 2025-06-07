@@ -90,6 +90,9 @@ class TrackManagement(StatesGroup):
     adding_signature = State()
     deleting_track = State()
 
+class FindTrackFSM(StatesGroup):
+    waiting_suffix = State()
+
 
 
 # ==========================
@@ -158,6 +161,9 @@ ADMIN_COMMANDS = USER_COMMANDS + [
     BotCommand(command="check_issued", description="📦 Обновить 'Выданное'"),
     BotCommand(command="push", description="📢 Массовая рассылка"),
     BotCommand(command="update_texts", description="🔄 Обновить тексты уведомлений"),
+    BotCommand(command="find_track", description="🔍 Поиск трека по цифрам"),
+    BotCommand(command="find_by_code", description="🔍 Поиск треков по индивидуальному коду"),
+
 ]
 
 async def set_bot_commands():
@@ -991,6 +997,194 @@ async def update_texts_handler(message: Message):
     load_texts()  # Загружаем тексты заново из Google Sheets
     await message.answer("✅ Тексты обновлены!")
     
+# ✅ Поиск трека по последним 4 цифрам (для админа)
+@router.message(Command("find_track"))
+async def find_track_command(message: Message, state: FSMContext):
+    if str(message.from_user.id) not in ADMIN_IDS:
+        await message.answer("❌ У вас нет прав для этой команды!")
+        return
+
+    await state.set_state(FindTrackFSM.waiting_suffix)
+    await message.answer("🔍 Введите последние 4–6 цифр трек-номера:")
+
+@router.message(FindTrackFSM.waiting_suffix)
+async def process_track_suffix(message: Message, state: FSMContext):
+    suffix = message.text.strip().lower()
+    await state.clear()
+
+    if not suffix.isalnum() or len(suffix) < 2 or len(suffix) > 6:
+        await message.answer("⚠️ Введите от 2 до 6 символов (цифры или буквы).")
+        return
+
+    def search_table(sheet, label, status_text):
+        results = []
+        records = sheet.get_all_values()[1:]
+        for i, row in enumerate(records):
+            if len(row) > 0 and row[0].strip().lower().endswith(suffix):
+                results.append({
+                    "track": row[0].strip().upper(),
+                    "status": status_text,
+                    "date": row[2] if len(row) > 2 else "",
+                    "manager_code": row[3] if len(row) > 3 else "",
+                    "signature": row[4] if len(row) > 4 else "",
+                    "user_id": row[5] if len(row) > 5 else None
+                })
+        return results
+
+    results = []
+    results += search_table(issued_sheet, "Выданное", "Выдано")
+    results += search_table(kz_sheet, "Казахстан", "На складе в КЗ")
+    results += search_table(china_sheet, "Китай", "В пути до Алматы")
+
+    if not results:
+        await message.answer("📭 Совпадений не найдено.")
+        return
+
+    seen = set()
+    filtered = []
+    for item in results:
+        if item["track"] in seen:
+            continue
+        seen.add(item["track"])
+        filtered.append(item)
+
+    for item in filtered:
+        text = (
+            f"🔸 `{item['track']}`\n"
+            f"📍 Статус: *{item['status']}*\n"
+        )
+        if item["date"]:
+            text += f"📅 Дата: {item['date']}\n"
+        if item["manager_code"]:
+            text += f"🔑 Индивидуальный код: {item['manager_code']}\n"
+        if item["signature"]:
+            text += f"✏️ Подпись: {item['signature']}\n"
+        if item["user_id"]:
+            text += f"🆔 ID: {item['user_id']}"
+
+        buttons = [
+            [InlineKeyboardButton(text="📋 Скопировать", callback_data=f"copy:{item['track']}")]
+        ]
+        if item["user_id"]:
+            buttons[0].append(InlineKeyboardButton(text="📤 Отправить клиенту", callback_data=f"send:{item['user_id']}:{item['track']}"))
+
+        markup = InlineKeyboardMarkup(inline_keyboard=buttons)
+        await message.answer(text, parse_mode="Markdown", reply_markup=markup)
+
+
+# ✅ Обработка inline-кнопок
+@router.callback_query(F.data.startswith("copy:"))
+async def handle_copy_button(callback: CallbackQuery):
+    track = callback.data.split(":", 1)[1]
+    await callback.answer("✅ Скопируйте трек-номер")
+    await callback.message.answer(f"📋 Трек для копирования: `{track}`", parse_mode="Markdown")
+
+@router.callback_query(F.data.startswith("send:"))
+async def handle_send_to_client(callback: CallbackQuery):
+    _, user_id, track = callback.data.split(":")
+    user_id = int(user_id)
+    await callback.answer("📤 Отправлено клиенту")
+    try:
+        await bot.send_message(user_id, f"📦 Статус вашего трека `{track}` обновлён.", parse_mode="Markdown")
+    except Exception as e:
+        await callback.message.answer(f"⚠️ Ошибка при отправке клиенту: {e}")
+
+# ✅ Команда /find_by_code — найти все треки по индивидуальному коду
+@router.message(Command("find_by_code"))
+async def find_by_code_command(message: Message, state: FSMContext):
+    if str(message.from_user.id) not in ADMIN_IDS:
+        await message.answer("❌ У вас нет прав для этой команды!")
+        return
+
+    await state.set_state(FindByCodeFSM.waiting_code)
+    await message.answer("🔍 Введите индивидуальный код клиента:")
+
+@router.message(FindByCodeFSM.waiting_code)
+async def process_code(message: Message, state: FSMContext):
+    manager_code = message.text.strip()
+    await state.clear()
+
+    # Поиск Telegram ID клиента по таблице пользователей
+    user_records = users_sheet.get_all_values()[1:]
+    user_id = None
+    for row in user_records:
+        if len(row) > 1 and row[0].strip() == manager_code:
+            user_id = row[2] if len(row) > 2 else None
+            break
+
+    if not user_id:
+        await message.answer("❌ Пользователь с таким кодом не найден в таблице пользователей.")
+        return
+
+    def search_by_user(sheet, status_text):
+        results = []
+        rows = sheet.get_all_values()[1:]
+        for row in rows:
+            if len(row) > 5 and row[5].strip() == user_id:
+                results.append({
+                    "track": row[0].strip().upper(),
+                    "status": status_text,
+                    "date": row[2] if len(row) > 2 else "",
+                    "signature": row[4] if len(row) > 4 else ""
+                })
+        return results
+
+    tracks = []
+    seen = set()
+    for sheet, label in [
+        (issued_sheet, "Выдано"),
+        (kz_sheet, "На складе в КЗ"),
+        (china_sheet, "В пути до Алматы")
+    ]:
+        results = search_by_user(sheet, label)
+        for item in results:
+            if item["track"] not in seen:
+                seen.add(item["track"])
+                tracks.append(item)
+
+    if not tracks:
+        await message.answer("📭 У клиента нет активных треков в таблицах.")
+        return
+
+    # Формируем общий текст
+    text = f"🔎 Найдено {len(tracks)} треков по коду: {manager_code}\n🆔 Telegram ID клиента: {user_id}\n"
+    for item in tracks:
+        text += f"\n— `{item['track']}`\n📍 Статус: *{item['status']}*\n"
+        if item["date"]:
+            text += f"📅 Дата: {item['date']}\n"
+        if item["signature"]:
+            text += f"✏️ Подпись: {item['signature']}\n"
+
+    # Кнопки снизу
+    buttons = [
+        [InlineKeyboardButton(text="📋 Скопировать всё", callback_data=f"copyall:{manager_code}")]
+    ]
+    if user_id:
+        buttons[0].append(InlineKeyboardButton(
+            text="📤 Отправить клиенту", callback_data=f"sendall:{user_id}:{manager_code}"
+        ))
+    markup = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await message.answer(text, parse_mode="Markdown", reply_markup=markup)
+
+# 📋 Обработка копирования всех треков
+@router.callback_query(F.data.startswith("copyall:"))
+async def handle_copy_all(callback: CallbackQuery):
+    code = callback.data.split(":")[1]
+    await callback.answer("📋 Скопируйте список треков")
+    await callback.message.answer(f"Код клиента: `{code}`", parse_mode="Markdown")
+
+# 📤 Отправка клиенту всего списка треков
+@router.callback_query(F.data.startswith("sendall:"))
+async def handle_send_all(callback: CallbackQuery):
+    _, user_id, code = callback.data.split(":")
+    user_id = int(user_id)
+    await callback.answer("📤 Отправлено клиенту")
+    try:
+        await bot.send_message(user_id, f"📦 Статус ваших треков по коду `{code}` обновлён.", parse_mode="Markdown")
+    except Exception as e:
+        await callback.message.answer(f"⚠️ Ошибка при отправке клиенту: {e}")
+
 
 
 async def main():
