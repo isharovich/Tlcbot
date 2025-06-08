@@ -1096,11 +1096,51 @@ async def handle_copy_button(callback: CallbackQuery):
 async def handle_send_to_client(callback: CallbackQuery):
     _, user_id, track = callback.data.split(":")
     user_id = int(user_id)
-    await callback.answer("📤 Отправлено клиенту")
+
+    # Ищем этот трек во всех таблицах
+    all_sheets = [
+        (issued_sheet, "Выдано"),
+        (kz_sheet, "На складе в КЗ"),
+        (china_sheet, "В пути до Алматы")
+    ]
+
+    full_info = None
+    for sheet, status in all_sheets:
+        records = sheet.get_all_values()[1:]
+        for row in records:
+            if len(row) > 0 and row[0].strip().upper() == track.upper():
+                full_info = {
+                    "track": track,
+                    "status": status,
+                    "date": row[2] if len(row) > 2 else "",
+                    "manager_code": row[3] if len(row) > 3 else "",
+                    "signature": row[4] if len(row) > 4 else ""
+                }
+                break
+        if full_info:
+            break
+
+    if not full_info:
+        await callback.answer("❌ Трек не найден.")
+        return
+
+    # Формируем текст для клиента
+    text = f"📦 Обновление по вашему трек-номеру:\n\n"
+    text += f"🔸 `{full_info['track']}`\n"
+    text += f"📍 Статус: *{full_info['status']}*\n"
+    if full_info["date"]:
+        text += f"📅 Дата: {full_info['date']}\n"
+    if full_info["manager_code"]:
+        text += f"🔑 Индивидуальный код: {full_info['manager_code']}\n"
+    if full_info["signature"]:
+        text += f"✏️ Подпись: {full_info['signature']}"
+
     try:
-        await bot.send_message(user_id, f"📦 Статус вашего трека `{track}` обновлён.", parse_mode="Markdown")
+        await bot.send_message(user_id, text, parse_mode="Markdown")
+        await callback.answer("📤 Уведомление отправлено клиенту")
     except Exception as e:
         await callback.message.answer(f"⚠️ Ошибка при отправке клиенту: {e}")
+
 
 # ✅ Команда /find_by_code — найти все треки по индивидуальному коду
 @router.message(Command("find_by_code"))
@@ -1121,8 +1161,8 @@ async def process_code(message: Message, state: FSMContext):
     user_records = users_sheet.get_all_values()[1:]
     user_id = None
     for row in user_records:
-        if len(row) > 1 and row[0].strip() == manager_code:
-            user_id = row[2] if len(row) > 2 else None
+        if len(row) > 4 and row[4].strip() == manager_code:
+            user_id = row[0].strip()
             break
 
     if not user_id:
