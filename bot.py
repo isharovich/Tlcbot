@@ -14,7 +14,7 @@ import json
 from collections import defaultdict, deque
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
-
+from aiogram.filters import StateFilter
 
 from logging.handlers import RotatingFileHandler
 
@@ -915,13 +915,21 @@ async def cancel_handler(message: Message, state: FSMContext):
 # 🔹 Запуск бота
 # ==========================
 # ✅ Добавление трека в базу (обновленный код)
-@router.message(lambda message: not message.text.startswith("/") and message.text not in [
-    "📦 Проверить статус посылок", "🖊 Подписать трек-номер", "❌ Удалить трек-номер", "📞 Связаться с менеджером",
-    "/sign_track", "/delete_track", "/contact_manager"
-])
+@router.message(
+    StateFilter(None),
+    lambda message: not message.text.startswith("/") and message.text not in [
+        "📦 Проверить статус посылок", "🖊 Подписать трек-номер", "❌ Удалить трек-номер", "📞 Связаться с менеджером",
+        "/sign_track", "/delete_track", "/contact_manager"
+    ]
+)
 async def add_tracking_handler(message: Message, state: FSMContext):
-    # 🔒 Проверка: если пользователь в процессе регистрации — не даём добавить трек
     current_state = await state.get_state()
+
+    # 💥 Если пользователь сейчас в FSM (любой), выходим
+    if current_state is not None:
+        return
+
+    # 🔒 Защита от регистрации, если вдруг фильтр не сработал
     if current_state in [
         Registration.name.state,
         Registration.city.state,
