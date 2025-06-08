@@ -41,6 +41,7 @@ logging.basicConfig(
 TOKEN = "6974697621:AAHM4qa91k4nq4Hsbn-rSDTkL8-6hAsa3pA"  # Укажи свой токен прямо в коде или загрузи из переменной окружения
 SHEET_ID = "1QaR920L5bZUGNLk02M-lgXr9c5_nHJQVoPgPL7UVVY4"
 ADMIN_IDS = ["665932047", "473541446"]  # Telegram ID админа
+MINI_ADMIN_IDS = ["914265474"]  # ← здесь реальные Telegram ID
 
 # Загрузка JSON-ключей из переменной окружения
 with open("/root/Tlcbot/credentials/tlcbot-453608-3ac701333130.json") as f:
@@ -160,24 +161,28 @@ USER_COMMANDS = [
     BotCommand(command="cancel", description="❌ Отменить текущее действие"),
 ]
 
-ADMIN_COMMANDS = USER_COMMANDS + [
+MINI_ADMIN_COMMANDS = USER_COMMANDS + [
+    BotCommand(command="find_track", description="🔍 Поиск трека по цифрам"),
+    BotCommand(command="find_by_code", description="🔍 Поиск треков по коду"),
+]
+
+ADMIN_COMMANDS = MINI_ADMIN_COMMANDS + [
     BotCommand(command="check_china", description="🇨🇳 Проверить Китай"),
     BotCommand(command="check_kz", description="🇰🇿 Проверить Казахстан"),
     BotCommand(command="check_issued", description="📦 Обновить 'Выданное'"),
     BotCommand(command="push", description="📢 Массовая рассылка"),
     BotCommand(command="update_texts", description="🔄 Обновить тексты уведомлений"),
-    BotCommand(command="find_track", description="🔍 Поиск трека по цифрам"),
-    BotCommand(command="find_by_code", description="🔍 Поиск треков по индивидуальному коду"),
-
 ]
 
 async def set_bot_commands():
+    await bot.set_my_commands(USER_COMMANDS)  # базовые команды по умолчанию
 
-    await bot.set_my_commands(USER_COMMANDS)
+    for mini_id in MINI_ADMIN_IDS:
+        await bot.set_my_commands(MINI_ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=mini_id))
 
     for admin_id in ADMIN_IDS:
-
         await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=admin_id))
+
 
 # ==========================
 # 🔹 Обработчики команд
@@ -1013,7 +1018,7 @@ async def update_texts_handler(message: Message):
 # ✅ Поиск трека по последним 4 цифрам (для админа)
 @router.message(Command("find_track"))
 async def find_track_command(message: Message, state: FSMContext):
-    if str(message.from_user.id) not in ADMIN_IDS:
+    if str(message.from_user.id) not in MINI_ADMIN_IDS + ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
 
@@ -1145,7 +1150,7 @@ async def handle_send_to_client(callback: CallbackQuery):
 # ✅ Команда /find_by_code — найти все треки по индивидуальному коду
 @router.message(Command("find_by_code"))
 async def find_by_code_command(message: Message, state: FSMContext):
-    if str(message.from_user.id) not in ADMIN_IDS:
+    if str(message.from_user.id) not in MINI_ADMIN_IDS + ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
 
@@ -1154,20 +1159,22 @@ async def find_by_code_command(message: Message, state: FSMContext):
 
 @router.message(FindByCodeFSM.waiting_code)
 async def process_code(message: Message, state: FSMContext):
-    manager_code = message.text.strip()
+    manager_code = message.text.strip().lower()  # 🟢 привели к нижнему регистру
     await state.clear()
 
     # Поиск Telegram ID клиента по таблице пользователей
     user_records = users_sheet.get_all_values()[1:]
     user_id = None
     for row in user_records:
-        if len(row) > 4 and row[4].strip() == manager_code:
+        if len(row) > 4 and row[4].strip().lower() == manager_code:  # 🟢 сравнение в нижнем регистре
             user_id = row[0].strip()
             break
 
     if not user_id:
         await message.answer("❌ Пользователь с таким кодом не найден в таблице пользователей.")
         return
+
+    # ... остальная логика по отправке результатов
 
     def search_by_user(sheet, status_text):
         results = []
@@ -1232,11 +1239,49 @@ async def handle_copy_all(callback: CallbackQuery):
 async def handle_send_all(callback: CallbackQuery):
     _, user_id, code = callback.data.split(":")
     user_id = int(user_id)
-    await callback.answer("📤 Отправлено клиенту")
+
+    # Получаем все треки клиента по этому ID
+    all_sheets = [
+        (issued_sheet, "Выдано"),
+        (kz_sheet, "На складе в КЗ"),
+        (china_sheet, "В пути до Алматы")
+    ]
+
+    tracks = []
+    seen = set()
+    for sheet, status in all_sheets:
+        records = sheet.get_all_values()[1:]
+        for row in records:
+            if len(row) > 5 and row[5].strip() == str(user_id):
+                track = row[0].strip().upper()
+                if track not in seen:
+                    seen.add(track)
+                    tracks.append({
+                        "track": track,
+                        "status": status,
+                        "date": row[2] if len(row) > 2 else "",
+                        "signature": row[4] if len(row) > 4 else ""
+                    })
+
+    if not tracks:
+        await callback.message.answer("❌ У клиента нет активных треков.")
+        return
+
+    # Формируем текст для клиента
+    text = f"📦 Обновление по вашим трекам (код: `{code}`):\n"
+    for item in tracks:
+        text += f"\n🔸 `{item['track']}`\n📍 Статус: *{item['status']}*\n"
+        if item["date"]:
+            text += f"📅 Дата: {item['date']}\n"
+        if item["signature"]:
+            text += f"✏️ Подпись: {item['signature']}\n"
+
     try:
-        await bot.send_message(user_id, f"📦 Статус ваших треков по коду `{code}` обновлён.", parse_mode="Markdown")
+        await bot.send_message(user_id, text, parse_mode="Markdown")
+        await callback.answer("📤 Уведомление отправлено клиенту")
     except Exception as e:
         await callback.message.answer(f"⚠️ Ошибка при отправке клиенту: {e}")
+
 
 
 
