@@ -40,8 +40,8 @@ logging.basicConfig(
 
 TOKEN = "6974697621:AAHM4qa91k4nq4Hsbn-rSDTkL8-6hAsa3pA"  # Укажи свой токен прямо в коде или загрузи из переменной окружения
 SHEET_ID = "1QaR920L5bZUGNLk02M-lgXr9c5_nHJQVoPgPL7UVVY4"
-ADMIN_IDS = ["665932047", "473541446"]  # Telegram ID админа
-MINI_ADMIN_IDS = ["914265474"]  # ← здесь реальные Telegram ID
+ADMIN_IDS = ["665932047", "473541446", "5181691179"]  # Telegram ID админа
+MINI_ADMIN_IDS = ["914265474", "1285622060",]  # ← здесь реальные Telegram ID
 
 # Загрузка JSON-ключей из переменной окружения
 with open("/root/Tlcbot/credentials/tlcbot-453608-3ac701333130.json") as f:
@@ -97,6 +97,15 @@ class FindTrackFSM(StatesGroup):
 
 class FindByCodeFSM(StatesGroup):
     waiting_code = State()
+
+class FindByPhoneFSM(StatesGroup):
+    waiting_phone = State()
+
+    # 📜 FSM для стресс-теста
+class StressTestFSM(StatesGroup):
+    waiting_confirmation = State()
+
+
 
 
 
@@ -164,6 +173,8 @@ USER_COMMANDS = [
 MINI_ADMIN_COMMANDS = USER_COMMANDS + [
     BotCommand(command="find_track", description="🔍 Поиск трека по цифрам"),
     BotCommand(command="find_by_code", description="🔍 Поиск треков по коду"),
+    BotCommand(command="find_by_phone", description="🔍 Поиск по номеру телефона"),
+    BotCommand(command="stress_test", description="💥 Проверка устойчивости бота"),
 ]
 
 ADMIN_COMMANDS = MINI_ADMIN_COMMANDS + [
@@ -319,10 +330,10 @@ async def check_status_handler(message: Message):
     text = get_text("status_header") + "\n"
     for indicator, status, track_number, date, signature in user_tracks:
         date_part = f" ({date})" if date else ""
-        text += f"{indicator} {status}: {track_number}{date_part} ({signature})\n"
+        signature_part = f" ({signature})" if signature else ""
+        text += f"{indicator} {status}: {track_number}{date_part}{signature_part}\n"
 
     await message.answer(text)
-
 
 # Определяем состояния FSM (Добавь в начало файла)
 class TrackSigning(StatesGroup):
@@ -1015,7 +1026,7 @@ async def update_texts_handler(message: Message):
     load_texts()  # Загружаем тексты заново из Google Sheets
     await message.answer("✅ Тексты обновлены!")
     
-# ✅ Поиск трека по последним 4 цифрам (для админа)
+# ✅ Поиск по трек-номеру (для админа)
 @router.message(Command("find_track"))
 async def find_track_command(message: Message, state: FSMContext):
     if str(message.from_user.id) not in MINI_ADMIN_IDS + ADMIN_IDS:
@@ -1023,22 +1034,23 @@ async def find_track_command(message: Message, state: FSMContext):
         return
 
     await state.set_state(FindTrackFSM.waiting_suffix)
-    await message.answer("🔍 Введите последние 4–6 цифр трек-номера:")
+    await message.answer("🔍 Введите часть трек-номера (от 4 до 25 символов):")
+
 
 @router.message(FindTrackFSM.waiting_suffix)
 async def process_track_suffix(message: Message, state: FSMContext):
     suffix = message.text.strip().lower()
     await state.clear()
 
-    if not suffix.isalnum() or len(suffix) < 2 or len(suffix) > 6:
-        await message.answer("⚠️ Введите от 2 до 6 символов (цифры или буквы).")
+    if not suffix.isalnum() or len(suffix) < 4 or len(suffix) > 25:
+        await message.answer("⚠️ Введите от 4 до 25 символов (только буквы и цифры).")
         return
 
     def search_table(sheet, label, status_text):
         results = []
         records = sheet.get_all_values()[1:]
         for i, row in enumerate(records):
-            if len(row) > 0 and row[0].strip().lower().endswith(suffix):
+            if len(row) > 0 and suffix in row[0].strip().lower():
                 results.append({
                     "track": row[0].strip().upper(),
                     "status": status_text,
@@ -1088,6 +1100,7 @@ async def process_track_suffix(message: Message, state: FSMContext):
 
         markup = InlineKeyboardMarkup(inline_keyboard=buttons)
         await message.answer(text, parse_mode="Markdown", reply_markup=markup)
+
 
 
 # ✅ Обработка inline-кнопок
@@ -1282,6 +1295,188 @@ async def handle_send_all(callback: CallbackQuery):
     except Exception as e:
         await callback.message.answer(f"⚠️ Ошибка при отправке клиенту: {e}")
 
+# ✅ Команда /find_by_phone — найти все треки по номеру телефона
+@router.message(Command("find_by_phone"))
+async def find_by_phone_command(message: Message, state: FSMContext):
+    if str(message.from_user.id) not in MINI_ADMIN_IDS + ADMIN_IDS:
+        await message.answer("❌ У вас нет прав для этой команды!")
+        return
+
+    await state.set_state(FindByPhoneFSM.waiting_phone)
+    await message.answer("🔍 Введите номер телефона клиента (в любом формате):")
+
+
+@router.message(FindByPhoneFSM.waiting_phone)
+async def process_phone(message: Message, state: FSMContext):
+    import re
+    await state.clear()
+
+    def normalize_last9(text):
+        digits = re.sub(r"\D", "", text)
+        return digits[-9:]
+
+    phone_input = message.text.strip()
+    phone_clean = normalize_last9(phone_input)
+
+    user_records = users_sheet.get_all_values()[1:]
+    user_id = None
+    manager_code = None
+
+    for row in user_records:
+        if len(row) > 3:
+            row_phone = row[3]
+            row_clean = normalize_last9(row_phone)
+            if row_clean == phone_clean:
+                user_id = row[0].strip()
+                manager_code = row[4].strip() if len(row) > 4 else ""
+                break
+
+    if not user_id:
+        await message.answer("❌ Клиент с таким номером телефона не найден.")
+        return
+
+    def search_by_user(sheet, status_text):
+        results = []
+        rows = sheet.get_all_values()[1:]
+        for row in rows:
+            if len(row) > 5 and row[5].strip() == user_id:
+                results.append({
+                    "track": row[0].strip().upper(),
+                    "status": status_text,
+                    "date": row[2] if len(row) > 2 else "",
+                    "signature": row[4] if len(row) > 4 else ""
+                })
+        return results
+
+    tracks = []
+    seen = set()
+    for sheet, label in [
+        (issued_sheet, "Выдано"),
+        (kz_sheet, "На складе в КЗ"),
+        (china_sheet, "В пути до Алматы")
+    ]:
+        results = search_by_user(sheet, label)
+        for item in results:
+            if item["track"] not in seen:
+                seen.add(item["track"])
+                tracks.append(item)
+
+    if not tracks:
+        await message.answer("📭 У клиента нет активных треков в таблицах.")
+        return
+
+    text = f"🔎 Найдено {len(tracks)} треков по номеру: {phone_input}\n🆔 Telegram ID клиента: {user_id}\n"
+    for item in tracks:
+        text += f"\n— `{item['track']}`\n📍 Статус: *{item['status']}*\n"
+        if item["date"]:
+            text += f"📅 Дата: {item['date']}\n"
+        if item["signature"]:
+            text += f"✏️ Подпись: {item['signature']}\n"
+
+    buttons = [
+        [InlineKeyboardButton(text="📋 Скопировать всё", callback_data=f"copyall_phone:{user_id}")],
+        [InlineKeyboardButton(text="📤 Отправить клиенту", callback_data=f"sendall_phone:{user_id}:{manager_code or 'unknown'}")]
+    ]
+    markup = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await message.answer(text, parse_mode="Markdown", reply_markup=markup)
+
+@router.callback_query(F.data.startswith("copyall_phone:"))
+async def handle_copyall_phone(callback: CallbackQuery):
+    user_id = callback.data.split(":")[1]
+    await callback.answer("📋 Скопируйте список треков")
+    await callback.message.answer(f"Telegram ID клиента: `{user_id}`", parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("sendall_phone:"))
+async def handle_sendall_phone(callback: CallbackQuery):
+    _, user_id, code = callback.data.split(":")
+    user_id = int(user_id)
+
+    all_sheets = [
+        (issued_sheet, "Выдано"),
+        (kz_sheet, "На складе в КЗ"),
+        (china_sheet, "В пути до Алматы")
+    ]
+
+    tracks = []
+    seen = set()
+    for sheet, status in all_sheets:
+        records = sheet.get_all_values()[1:]
+        for row in records:
+            if len(row) > 5 and row[5].strip() == str(user_id):
+                track = row[0].strip().upper()
+                if track not in seen:
+                    seen.add(track)
+                    tracks.append({
+                        "track": track,
+                        "status": status,
+                        "date": row[2] if len(row) > 2 else "",
+                        "signature": row[4] if len(row) > 4 else ""
+                    })
+
+    if not tracks:
+        await callback.message.answer("❌ У клиента нет активных треков.")
+        return
+
+    text = f"📦 Обновление по вашим трекам (по номеру телефона):\n"
+    for item in tracks:
+        text += f"\n🔸 `{item['track']}`\n📍 Статус: *{item['status']}*\n"
+        if item["date"]:
+            text += f"📅 Дата: {item['date']}\n"
+        if item["signature"]:
+            text += f"✏️ Подпись: {item['signature']}\n"
+
+    try:
+        await bot.send_message(user_id, text, parse_mode="Markdown")
+        await callback.answer("📤 Уведомление отправлено клиенту")
+    except Exception as e:
+        await callback.message.answer(f"⚠️ Ошибка при отправке клиенту: {e}")
+
+# 🧨 Команда /stress_test
+@router.message(Command("stress_test"))
+async def stress_test_command(message: Message, state: FSMContext):
+    if str(message.from_user.id) not in ADMIN_IDS + MINI_ADMIN_IDS:
+        await message.answer("❌ Эта команда только для админов и мини-админов!")
+        return
+
+    await state.set_state(StressTestFSM.waiting_confirmation)
+    buttons = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Проверить устойчивость бота", callback_data="stress_yes"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="stress_no")
+        ]
+    ])
+    await message.answer("Вы действительно хотите проверить устойчивость бота?", reply_markup=buttons)
+
+# 🚫 Отмена
+@router.callback_query(F.data == "stress_no")
+async def cancel_stress_test(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    await state.clear()
+
+# 💥 Запуск фейкового краша
+@router.callback_query(F.data == "stress_yes")
+async def launch_stress_test(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text("🔍 Инициализация стресс-теста... Пожалуйста, подождите...")
+    await asyncio.sleep(20)
+
+    messages = [
+        "❗️ Ошибка: недоступен модуль core.memory",
+        "⚠️ Внимание: повреждение конфигурации aiogram.router",
+        "🚫 Сбой подключения к Telegram API",
+        "💣 Перезапуск не удался: код ошибки 127",
+        "📉 Критическая утечка памяти",
+        "🔒 Сервис авторизации отключён",
+        "💀 Запущен аварийный режим",
+        "🧨 Идёт удаление всех пользовательских данных..."
+    ]
+
+    for msg in messages:
+        await callback.message.answer(msg)
+
+    await callback.message.answer("😄 Это был розыгрыш! Бот работает стабильно. Но ты неплохо занервничал 😁")
 
 
 
