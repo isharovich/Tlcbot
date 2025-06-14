@@ -208,7 +208,7 @@ async def start_handler(message: Message):
 # Храним ID пользователей, у которых идёт обработка шага
 processing_users = set()
 
-@router.message(F.text.lower().in_(["отмена", "/cancel", "/отмена"]))
+@router.message(lambda message: message.text.lower() in ["отмена", "/cancel", "/отмена"])
 async def cancel_handler_global(message: Message, state: FSMContext):
     await cancel_handler(message, state)
 
