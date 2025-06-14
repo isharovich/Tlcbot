@@ -41,7 +41,7 @@ logging.basicConfig(
 TOKEN = "6974697621:AAHM4qa91k4nq4Hsbn-rSDTkL8-6hAsa3pA"  # Укажи свой токен прямо в коде или загрузи из переменной окружения
 SHEET_ID = "1QaR920L5bZUGNLk02M-lgXr9c5_nHJQVoPgPL7UVVY4"
 ADMIN_IDS = ["665932047", "473541446", "5181691179"]  # Telegram ID админа
-MINI_ADMIN_IDS = ["914265474", "1285622060",]  # ← здесь реальные Telegram ID
+MINI_ADMIN_IDS = ["914265474", "1285622060" "632325004",]  # ← здесь реальные Telegram ID
 
 # Загрузка JSON-ключей из переменной окружения
 with open("/root/Tlcbot/credentials/tlcbot-453608-3ac701333130.json") as f:
@@ -208,6 +208,10 @@ async def start_handler(message: Message):
 # Храним ID пользователей, у которых идёт обработка шага
 processing_users = set()
 
+@router.message(F.text.lower().in_(["отмена", "/cancel", "/отмена"]))
+async def cancel_handler_global(message: Message, state: FSMContext):
+    await cancel_handler(message, state)
+
 @router.message(Command("register"))
 async def register_command(message: Message, state: FSMContext):
     user_id = str(message.from_user.id)
@@ -235,29 +239,21 @@ async def register_command(message: Message, state: FSMContext):
 
 @router.message(Registration.name)
 async def register_name_handler(message: Message, state: FSMContext):
-    if message.text.lower() in ["отмена", "/отмена", "/cancel"]:
-        await cancel_handler(message, state)
-        return
-
+   
     await state.update_data(name=message.text.strip())
     await state.set_state(Registration.city)
     await message.answer(get_text("ask_city"))
 
 @router.message(Registration.city)
 async def register_city_handler(message: Message, state: FSMContext):
-    if message.text.lower() in ["отмена", "/отмена", "/cancel"]:
-        await cancel_handler(message, state)
-        return
-
+    
     await state.update_data(city=message.text.strip())
     await state.set_state(Registration.phone)
     await message.answer(get_text("ask_phone"))
 
 @router.message(Registration.phone)
 async def register_phone_handler(message: Message, state: FSMContext):
-    if message.text.lower() in ["отмена", "/отмена", "/cancel"]:
-        await cancel_handler(message, state)
-        return
+    
 
     await state.update_data(phone=message.text.strip())
     await state.set_state(Registration.manager_code)
@@ -265,10 +261,7 @@ async def register_phone_handler(message: Message, state: FSMContext):
 
 @router.message(Registration.manager_code)
 async def register_manager_handler(message: Message, state: FSMContext):
-    if message.text.lower() in ["отмена", "/отмена", "/cancel"]:
-        await cancel_handler(message, state)
-        return
-
+   
     data = await state.get_data()
     user_id = data["user_id"]
     name = data["name"]
@@ -300,7 +293,7 @@ async def check_status_handler(message: Message):
     for row in tracking_records[1:]:
         if len(row) > 4 and row[4] == user_id:  # Проверяем ID пользователя в 5-й колонке
             track_number = row[0].strip().lower()  # Трек-номер
-            signature = row[3] if len(row) > 3 and row[3] else "Без подписи"  # Подпись
+            signature = row[3] if len(row) > 3 else ""
 
             # Определяем статус, дату и индикатор
             if track_number in issued_records:
@@ -330,7 +323,7 @@ async def check_status_handler(message: Message):
     text = get_text("status_header") + "\n"
     for indicator, status, track_number, date, signature in user_tracks:
         date_part = f" ({date})" if date else ""
-        signature_part = f" ({signature})" if signature else ""
+        signature_part = f" ({signature})" if signature != "Без подписи" else ""
         text += f"{indicator} {status}: {track_number}{date_part}{signature_part}\n"
 
     await message.answer(text)
@@ -384,9 +377,7 @@ async def sign_track_handler(message: Message, state: FSMContext):
 # Обработка выбора трека
 @router.message(TrackSigning.selecting_track)
 async def process_track_selection(message: Message, state: FSMContext):
-    if message.text.lower() in ["отмена", "/отмена", "/cancel"]:
-        await cancel_handler(message, state)
-        return
+   
     
     selected_track = message.text.strip().upper()
     user_id = str(message.from_user.id)
@@ -410,10 +401,7 @@ async def process_track_selection(message: Message, state: FSMContext):
 # Обработка подписи
 @router.message(TrackSigning.entering_signature)
 async def process_signature(message: Message, state: FSMContext):
-    if message.text.lower() in ["отмена", "/отмена", "/cancel"]:
-        await cancel_handler(message, state)
-        return
-    
+   
     user_id = str(message.from_user.id)
     data = await state.get_data()
     selected_track = data.get("selected_track")
@@ -477,9 +465,6 @@ async def delete_track_handler(message: Message, state: FSMContext):
 
 @router.message(TrackDeleting.selecting_track)
 async def confirm_deletion(message: Message, state: FSMContext):
-    if message.text.lower() in ["отмена", "/отмена", "/cancel"]:
-        await cancel_handler(message, state)
-        return
     
     user_id = str(message.from_user.id)
     track_to_delete = message.text.strip().upper()
