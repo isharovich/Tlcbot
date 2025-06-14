@@ -41,7 +41,7 @@ logging.basicConfig(
 TOKEN = "6974697621:AAHM4qa91k4nq4Hsbn-rSDTkL8-6hAsa3pA"  # Укажи свой токен прямо в коде или загрузи из переменной окружения
 SHEET_ID = "1QaR920L5bZUGNLk02M-lgXr9c5_nHJQVoPgPL7UVVY4"
 ADMIN_IDS = ["665932047", "473541446", "5181691179"]  # Telegram ID админа
-MINI_ADMIN_IDS = ["914265474", "1285622060" "632325004",]  # ← здесь реальные Telegram ID
+MINI_ADMIN_IDS = ["914265474", "1285622060", "632325004",]  # ← здесь реальные Telegram ID
 
 # Загрузка JSON-ключей из переменной окружения
 with open("/root/Tlcbot/credentials/tlcbot-453608-3ac701333130.json") as f:
@@ -205,8 +205,14 @@ async def start_handler(message: Message):
     logging.info(f"/start от {message.from_user.id}")
     await message.answer(get_text("start_message"))
 
+# ✅ Обработка отмены в любом месте
+@router.message(lambda msg: msg.text and msg.text.lower() in ["отмена", "/cancel", "/отмена"])
+async def cancel_handler_global(message: Message, state: FSMContext):
+    await cancel_handler(message, state)
+    
 # Храним ID пользователей, у которых идёт обработка шага
 processing_users = set()
+
 
 
 @router.message(Command("register"))
