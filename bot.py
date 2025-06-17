@@ -174,8 +174,7 @@ MINI_ADMIN_COMMANDS = USER_COMMANDS + [
     BotCommand(command="find_track", description="🔍 Поиск трека по цифрам"),
     BotCommand(command="find_by_code", description="🔍 Поиск треков по коду"),
     BotCommand(command="find_by_phone", description="🔍 Поиск по номеру телефона"),
-    BotCommand(command="stress_test", description="💥 Проверка устойчивости бота"),
-]
+]   
 
 ADMIN_COMMANDS = MINI_ADMIN_COMMANDS + [
     BotCommand(command="check_china", description="🇨🇳 Проверить Китай"),
@@ -283,81 +282,93 @@ async def register_manager_handler(message: Message, state: FSMContext):
 @router.message(F.text.in_(["📦 Проверить статус посылок", "/check_status"]))
 async def check_status_handler(message: Message):
     user_id = str(message.from_user.id)
-    
-    # Загружаем все данные
-    tracking_records = tracking_sheet.get_all_values()
-    china_records = {row[0].strip().lower(): row[2] for row in china_sheet.get_all_values()[1:] if len(row) > 2}  # Китай (трек -> дата)
-    kz_records = {row[0].strip().lower(): row[2] for row in kz_sheet.get_all_values()[1:] if len(row) > 2}  # Казахстан (трек -> дата)
-    issued_records = {row[0].strip().lower(): row[2] for row in issued_sheet.get_all_values()[1:] if len(row) > 2}  # Выданное (трек -> дата)
+    logging.info(f"🛠️ /check_status от {user_id}")
 
-    user_tracks = []
-    
-    # Находим все треки пользователя
-    for row in tracking_records[1:]:
-        if len(row) > 4 and row[4] == user_id:  # Проверяем ID пользователя в 5-й колонке
-            track_number = row[0].strip().lower()  # Трек-номер
-            signature = row[3] if len(row) > 3 else ""
+    try:
+        # Загружаем таблицы
+        tracking_records = tracking_sheet.get_all_values()
+        china_data = china_sheet.get_all_values()[1:]
+        kz_data = kz_sheet.get_all_values()[1:]
+        issued_data = issued_sheet.get_all_values()[1:]
 
-            # Определяем статус, дату и индикатор
-            if track_number in issued_records:
-                indicator, status = "✅", "Выдана"
-                date = issued_records[track_number]
-            elif track_number in kz_records:
-                indicator, status = "🟢", "Прибыла в Казахстан"
-                date = kz_records[track_number]
-            elif track_number in china_records:
-                indicator, status = "🔵", "В пути до Алматы"
-                date = china_records[track_number]
-            else:
-                indicator, status = "🟠", "Ожидается на складе в Китае"
-                date = ""
+        # Преобразуем в словари
+        china_records = {row[0].strip().lower(): row[2] for row in china_data if len(row) > 2}
+        kz_records = {row[0].strip().lower(): row[2] for row in kz_data if len(row) > 2}
+        issued_records = {row[0].strip().lower(): row[2] for row in issued_data if len(row) > 2}
 
-            # Добавляем трек в список
-            user_tracks.append((indicator, status, track_number.upper(), date, signature))
+        user_tracks = []
 
-    # Сортируем список: 🟠 Трекинг → 🔵 Китай → 🟢 Казахстан → ✅ Выданное
-    user_tracks.sort(key=lambda x: ["🟠", "🔵", "🟢", "✅"].index(x[0]))
+        for row in tracking_records[1:]:
+            if len(row) > 4 and row[4] == user_id:
+                track_number = row[0].strip().lower()
+                signature = row[3] if len(row) > 3 else ""
 
-    # Формируем текст ответа
-    if not user_tracks:
-        await message.answer("📭 У вас нет активных трек-номеров.")
-        return
+                # Определяем статус
+                if track_number in issued_records:
+                    indicator, status = "✅", "Выдана"
+                    date = issued_records[track_number]
+                elif track_number in kz_records:
+                    indicator, status = "🟢", "Прибыла в Казахстан"
+                    date = kz_records[track_number]
+                elif track_number in china_records:
+                    indicator, status = "🔵", "В пути до Алматы"
+                    date = china_records[track_number]
+                else:
+                    indicator, status = "🟠", "Ожидается на складе в Китае"
+                    date = ""
 
-    text = get_text("status_header") + "\n"
-    for indicator, status, track_number, date, signature in user_tracks:
-        date_part = f" ({date})" if date else ""
-        signature_part = f" ({signature})" if signature != "Без подписи" else ""
-        text += f"{indicator} {status}: {track_number}{date_part}{signature_part}\n"
+                user_tracks.append((indicator, status, track_number.upper(), date, signature))
 
-    await message.answer(text)
+        if not user_tracks:
+            await message.answer("📭 У вас нет активных трек-номеров.")
+            return
 
-# Определяем состояния FSM (Добавь в начало файла)
-class TrackSigning(StatesGroup):
-    selecting_track = State()
-    entering_signature = State()
+        user_tracks.sort(key=lambda x: ["🟠", "🔵", "🟢", "✅"].index(x[0]))
 
+        header = get_text("status_header") + "\n"
+        lines = []
+        for indicator, status, track, date, signature in user_tracks:
+            line = f"{indicator} {status}: {track}"
+            if date:
+                line += f" ({date})"
+            if signature and signature != "Без подписи":
+                line += f" ({signature})"
+            lines.append(line)
 
+        # Отправка по частям, если длинное сообщение
+        MAX_LENGTH = 4000
+        chunk = header
+        for line in lines:
+            if len(chunk) + len(line) + 1 > MAX_LENGTH:
+                await message.answer(chunk)
+                chunk = ""
+            chunk += line + "\n"
+        if chunk.strip():
+            await message.answer(chunk)
 
-# Хранилище активных пользователей в процессе FSM
-active_states = {}
+        # Отправляем кнопки снизу
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="🖊 Подписать трек-номер"), KeyboardButton(text="❌ Удалить трек-номер")]
+            ],
+            resize_keyboard=True
+        )
+        await message.answer("🔧 Вы можете выбрать, что сделать с треком:", reply_markup=keyboard)
+
+    except Exception as e:
+        logging.exception("🔥 Ошибка в check_status_handler")
+        await message.answer("⚠️ Ошибка при получении статуса. Попробуйте позже.")
 
 # ✅ Подписать трек-номер
-@router.message(F.text.in_(["🖊 Подписать трек-номер", "/sign_track"]))
+@router.message(F.text.in_("🖊 Подписать трек-номер", "/sign_track"))
 async def sign_track_handler(message: Message, state: FSMContext):
     user_id = str(message.from_user.id)
-
-    # Предотвращаем повторный запуск FSM
-    current_state = await state.get_state()
-    if current_state is not None:
-        await message.answer("⏳ Пожалуйста, завершите предыдущее действие или введите /отмена.")
-        return
-
     await state.clear()
 
-    # Получаем треки пользователя
+    records = tracking_sheet.get_all_values()
     user_tracks = [
         row[0].strip().upper()
-        for row in tracking_sheet.get_all_values()
+        for row in records
         if len(row) > 4 and row[4] == user_id
     ]
 
@@ -365,46 +376,74 @@ async def sign_track_handler(message: Message, state: FSMContext):
         await message.answer("📭 У вас нет активных трек-номеров.")
         return
 
-    # Создаем клавиатуру с треками
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=track)] for track in user_tracks],
+    # Сохраняем треки и начальную страницу в FSM
+    await state.update_data(user_tracks=user_tracks, page=0)
+    await state.set_state(TrackSigning.selecting_track)
+    await show_track_page(message, state)
+
+
+async def show_track_page(message: Message, state: FSMContext):
+    data = await state.get_data()
+    user_tracks = data.get("user_tracks", [])
+    page = data.get("page", 0)
+
+    per_page = 5
+    total_pages = (len(user_tracks) + per_page - 1) // per_page
+    start = page * per_page
+    end = start + per_page
+    page_tracks = user_tracks[start:end]
+
+    keyboard = [[KeyboardButton(text=track)] for track in page_tracks]
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(KeyboardButton(text="◀️ Назад"))
+    if page < total_pages - 1:
+        nav_buttons.append(KeyboardButton(text="▶️ Далее"))
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+
+    reply_kb = ReplyKeyboardMarkup(
+        keyboard=keyboard,
         resize_keyboard=True,
-        one_time_keyboard=True
+        one_time_keyboard=False
     )
 
-    await state.set_state(TrackSigning.selecting_track)
-    await asyncio.sleep(0.1)
-    await message.answer("✏️ Выберите трек-номер, который хотите подписать:", reply_markup=keyboard)
+    await message.answer(
+        f"✏️ Выберите трек-номер для подписи (стр. {page+1}/{total_pages}):",
+        reply_markup=reply_kb
+    )
 
 
-# Обработка выбора трека
 @router.message(TrackSigning.selecting_track)
 async def process_track_selection(message: Message, state: FSMContext):
-   
-    
-    selected_track = message.text.strip().upper()
-    user_id = str(message.from_user.id)
+    text = message.text.strip().upper()
 
-    # Проверка, есть ли трек у пользователя
-    user_tracks = [
-        row[0].strip().upper()
-        for row in tracking_sheet.get_all_values()
-        if len(row) > 4 and row[4] == user_id
-    ]
+    if text == "◀️ НАЗАД" or text == "▶️ ДАЛЕЕ":
+        data = await state.get_data()
+        page = data.get("page", 0)
+        if text == "◀️ НАЗАД":
+            page = max(0, page - 1)
+        else:
+            page = page + 1
+        await state.update_data(page=page)
+        await show_track_page(message, state)
+        return
 
-    if selected_track not in user_tracks:
+    data = await state.get_data()
+    user_tracks = data.get("user_tracks", [])
+
+    if text not in user_tracks:
         await message.answer("❌ Такой трек не найден. Пожалуйста, выберите один из списка.")
         return
 
-    await state.update_data(selected_track=selected_track)
+    await state.update_data(selected_track=text)
     await state.set_state(TrackSigning.entering_signature)
     await asyncio.sleep(0.1)
     await message.answer("✏️ Введите подпись для выбранного трек-номера:", reply_markup=ReplyKeyboardRemove())
 
-# Обработка подписи
+
 @router.message(TrackSigning.entering_signature)
 async def process_signature(message: Message, state: FSMContext):
-   
     user_id = str(message.from_user.id)
     data = await state.get_data()
     selected_track = data.get("selected_track")
@@ -415,11 +454,10 @@ async def process_signature(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    # Обновляем подпись в таблице
     records = tracking_sheet.get_all_values()
     for i, row in enumerate(records):
         if row[0].strip().upper() == selected_track and len(row) > 4 and row[4] == user_id:
-            tracking_sheet.update_cell(i + 1, 4, signature)  # Столбец D — подпись
+            tracking_sheet.update_cell(i + 1, 4, signature)
             await message.answer(f"✅ Подпись обновлена для {selected_track}: {signature}")
             await state.clear()
             return
@@ -427,26 +465,16 @@ async def process_signature(message: Message, state: FSMContext):
     await message.answer("❌ Не удалось найти трек-номер. Введите /отмена и начните заново.")
     await state.clear()
 
-    
-class TrackDeleting(StatesGroup):
-    selecting_track = State()
-
 # ✅ Удалить трек-номер
-@router.message(F.text.in_(["❌ Удалить трек-номер", "/delete_track"]))
+@router.message(F.text.in_("❌ Удалить трек-номер", "/delete_track"))
 async def delete_track_handler(message: Message, state: FSMContext):
     user_id = str(message.from_user.id)
-
-    current_state = await state.get_state()
-    if current_state is not None:
-        await message.answer("⏳ Завершите предыдущее действие или введите /отмена.")
-        return
-
     await state.clear()
 
-    # Получаем треки пользователя
+    records = tracking_sheet.get_all_values()
     user_tracks = [
         row[0].strip().upper()
-        for row in tracking_sheet.get_all_values()
+        for row in records
         if len(row) > 4 and row[4] == user_id
     ]
 
@@ -454,30 +482,65 @@ async def delete_track_handler(message: Message, state: FSMContext):
         await message.answer("📭 У вас нет активных трек-номеров.")
         return
 
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=track)] for track in user_tracks],
+    await state.update_data(user_tracks=user_tracks, page=0)
+    await state.set_state(TrackDeleting.selecting_track)
+    await show_delete_page(message, state)
+
+
+async def show_delete_page(message: Message, state: FSMContext):
+    data = await state.get_data()
+    user_tracks = data.get("user_tracks", [])
+    page = data.get("page", 0)
+
+    per_page = 5
+    total_pages = (len(user_tracks) + per_page - 1) // per_page
+    start = page * per_page
+    end = start + per_page
+    page_tracks = user_tracks[start:end]
+
+    keyboard = [[KeyboardButton(text=track)] for track in page_tracks]
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(KeyboardButton(text="◀️ Назад"))
+    if page < total_pages - 1:
+        nav_buttons.append(KeyboardButton(text="▶️ Далее"))
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+
+    reply_kb = ReplyKeyboardMarkup(
+        keyboard=keyboard,
         resize_keyboard=True,
-        one_time_keyboard=True
+        one_time_keyboard=False
     )
 
-    await state.set_state(TrackDeleting.selecting_track)
-    await asyncio.sleep(0.1)
-    await message.answer("❌ Выберите трек-номер, который хотите удалить:", reply_markup=keyboard)
-
+    await message.answer(
+        f"❌ Выберите трек-номер для удаления (стр. {page+1}/{total_pages}):",
+        reply_markup=reply_kb
+    )
 
 
 @router.message(TrackDeleting.selecting_track)
 async def confirm_deletion(message: Message, state: FSMContext):
-    
-    user_id = str(message.from_user.id)
-    track_to_delete = message.text.strip().upper()
+    text = message.text.strip().upper()
 
+    if text == "◀️ НАЗАД" or text == "▶️ ДАЛЕЕ":
+        data = await state.get_data()
+        page = data.get("page", 0)
+        if text == "◀️ НАЗАД":
+            page = max(0, page - 1)
+        else:
+            page = page + 1
+        await state.update_data(page=page)
+        await show_delete_page(message, state)
+        return
+
+    user_id = str(message.from_user.id)
     records = tracking_sheet.get_all_values()
 
     for i, row in enumerate(records):
-        if row[0].strip().upper() == track_to_delete and len(row) > 4 and row[4] == user_id:
+        if row[0].strip().upper() == text and len(row) > 4 and row[4] == user_id:
             tracking_sheet.delete_rows(i + 1)
-            await message.answer(f"✅ Трек-номер {track_to_delete} удалён.", reply_markup=user_keyboard)
+            await message.answer(f"✅ Трек-номер {text} удалён.", reply_markup=user_keyboard)
             await state.clear()
             return
 
@@ -516,18 +579,22 @@ async def send_push_handler(message: Message, state: FSMContext):
     push_text = message.text.strip()
 
     # Получаем всех пользователей из таблицы
-    user_ids = users_sheet.col_values(1)  # Первый столбец — user_id
+    user_ids = users_sheet.col_values(1)
     sent_count = 0
+    error_count = 0
 
-    for user_id in user_ids[1:]:  # Пропускаем заголовок таблицы
+    for user_id in user_ids[1:]:  # Пропускаем заголовок
         try:
             await bot.send_message(user_id, push_text)
             sent_count += 1
+            await asyncio.sleep(0.3)  # 🔧 Защита от FloodLimit
         except Exception as e:
             logging.warning(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
+            error_count += 1
 
-    await message.answer(f"✅ Уведомление отправлено {sent_count} пользователям.")
-    await state.clear()  # Очищаем состояние FSM
+    await message.answer(f"✅ Уведомление отправлено {sent_count} пользователям.\n⚠️ Ошибок: {error_count}")
+    await state.clear()
+
 
     # 🛡️ Глобальные переменные (если ещё не добавлены)
 is_notifying = is_notifying if 'is_notifying' in globals() else {"china": False, "kz": False}
@@ -1013,7 +1080,7 @@ async def update_texts_handler(message: Message):
 
     load_texts()  # Загружаем тексты заново из Google Sheets
     await message.answer("✅ Тексты обновлены!")
-    
+
 # ✅ Поиск по трек-номеру (для админа)
 @router.message(Command("find_track"))
 async def find_track_command(message: Message, state: FSMContext):
@@ -1147,8 +1214,53 @@ async def handle_send_to_client(callback: CallbackQuery):
     except Exception as e:
         await callback.message.answer(f"⚠️ Ошибка при отправке клиенту: {e}")
 
+# ✅ Универсальная логика поиска треков по user_id
+async def send_tracks_by_user(message: Message, user_id: str, user_label: str, manager_code: str = ""):
+    all_data = {
+        "Выдано": issued_sheet.get_all_values()[1:],
+        "На складе в КЗ": kz_sheet.get_all_values()[1:],
+        "В пути до Алматы": china_sheet.get_all_values()[1:]
+    }
 
-# ✅ Команда /find_by_code — найти все треки по индивидуальному коду
+    tracks = []
+    seen = set()
+    for label, rows in all_data.items():
+        for row in rows:
+            if len(row) > 5 and row[5].strip() == user_id:
+                track = row[0].strip().upper()
+                if track not in seen:
+                    seen.add(track)
+                    tracks.append({
+                        "track": track,
+                        "status": label,
+                        "date": row[2] if len(row) > 2 else "",
+                        "signature": row[4] if len(row) > 4 else ""
+                    })
+
+    if not tracks:
+        await message.answer(f"📭 У клиента нет активных треков в таблицах ({user_label}).")
+        return
+
+    text = f"🔎 Найдено {len(tracks)} треков ({user_label})\n🆔 Telegram ID клиента: {user_id}\n"
+    for item in tracks:
+        text += f"\n— `{item['track']}`\n📍 Статус: *{item['status']}*\n"
+        if item["date"]:
+            text += f"📅 Дата: {item['date']}\n"
+        if item["signature"]:
+            text += f"✏️ Подпись: {item['signature']}\n"
+
+    buttons = [[
+        InlineKeyboardButton(text="📋 Скопировать всё", callback_data=f"copyall:{manager_code or user_id}"),
+        InlineKeyboardButton(text="📤 Отправить клиенту", callback_data=f"sendall:{user_id}:{manager_code or 'unknown'}")
+    ]]
+    markup = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    for i in range(0, len(text), 4000):
+        await message.answer(text[i:i+4000], parse_mode="Markdown")
+    await message.answer("👇 Выберите действие:", reply_markup=markup)
+
+
+# ✅ Команда /find_by_code
 @router.message(Command("find_by_code"))
 async def find_by_code_command(message: Message, state: FSMContext):
     if str(message.from_user.id) not in MINI_ADMIN_IDS + ADMIN_IDS:
@@ -1160,130 +1272,20 @@ async def find_by_code_command(message: Message, state: FSMContext):
 
 @router.message(FindByCodeFSM.waiting_code)
 async def process_code(message: Message, state: FSMContext):
-    manager_code = message.text.strip().lower()  # 🟢 привели к нижнему регистру
+    manager_code = message.text.strip().lower()
     await state.clear()
 
-    # Поиск Telegram ID клиента по таблице пользователей
     user_records = users_sheet.get_all_values()[1:]
-    user_id = None
-    for row in user_records:
-        if len(row) > 4 and row[4].strip().lower() == manager_code:  # 🟢 сравнение в нижнем регистре
-            user_id = row[0].strip()
-            break
+    user_id = next((row[0].strip() for row in user_records if len(row) > 4 and row[4].strip().lower() == manager_code), None)
 
     if not user_id:
         await message.answer("❌ Пользователь с таким кодом не найден в таблице пользователей.")
         return
 
-    # ... остальная логика по отправке результатов
+    await send_tracks_by_user(message, user_id, f"по коду: {manager_code}", manager_code)
 
-    def search_by_user(sheet, status_text):
-        results = []
-        rows = sheet.get_all_values()[1:]
-        for row in rows:
-            if len(row) > 5 and row[5].strip() == user_id:
-                results.append({
-                    "track": row[0].strip().upper(),
-                    "status": status_text,
-                    "date": row[2] if len(row) > 2 else "",
-                    "signature": row[4] if len(row) > 4 else ""
-                })
-        return results
 
-    tracks = []
-    seen = set()
-    for sheet, label in [
-        (issued_sheet, "Выдано"),
-        (kz_sheet, "На складе в КЗ"),
-        (china_sheet, "В пути до Алматы")
-    ]:
-        results = search_by_user(sheet, label)
-        for item in results:
-            if item["track"] not in seen:
-                seen.add(item["track"])
-                tracks.append(item)
-
-    if not tracks:
-        await message.answer("📭 У клиента нет активных треков в таблицах.")
-        return
-
-    # Формируем общий текст
-    text = f"🔎 Найдено {len(tracks)} треков по коду: {manager_code}\n🆔 Telegram ID клиента: {user_id}\n"
-    for item in tracks:
-        text += f"\n— `{item['track']}`\n📍 Статус: *{item['status']}*\n"
-        if item["date"]:
-            text += f"📅 Дата: {item['date']}\n"
-        if item["signature"]:
-            text += f"✏️ Подпись: {item['signature']}\n"
-
-    # Кнопки снизу
-    buttons = [
-        [InlineKeyboardButton(text="📋 Скопировать всё", callback_data=f"copyall:{manager_code}")]
-    ]
-    if user_id:
-        buttons[0].append(InlineKeyboardButton(
-            text="📤 Отправить клиенту", callback_data=f"sendall:{user_id}:{manager_code}"
-        ))
-    markup = InlineKeyboardMarkup(inline_keyboard=buttons)
-
-    await message.answer(text, parse_mode="Markdown", reply_markup=markup)
-
-# 📋 Обработка копирования всех треков
-@router.callback_query(F.data.startswith("copyall:"))
-async def handle_copy_all(callback: CallbackQuery):
-    code = callback.data.split(":")[1]
-    await callback.answer("📋 Скопируйте список треков")
-    await callback.message.answer(f"Код клиента: `{code}`", parse_mode="Markdown")
-
-# 📤 Отправка клиенту всего списка треков
-@router.callback_query(F.data.startswith("sendall:"))
-async def handle_send_all(callback: CallbackQuery):
-    _, user_id, code = callback.data.split(":")
-    user_id = int(user_id)
-
-    # Получаем все треки клиента по этому ID
-    all_sheets = [
-        (issued_sheet, "Выдано"),
-        (kz_sheet, "На складе в КЗ"),
-        (china_sheet, "В пути до Алматы")
-    ]
-
-    tracks = []
-    seen = set()
-    for sheet, status in all_sheets:
-        records = sheet.get_all_values()[1:]
-        for row in records:
-            if len(row) > 5 and row[5].strip() == str(user_id):
-                track = row[0].strip().upper()
-                if track not in seen:
-                    seen.add(track)
-                    tracks.append({
-                        "track": track,
-                        "status": status,
-                        "date": row[2] if len(row) > 2 else "",
-                        "signature": row[4] if len(row) > 4 else ""
-                    })
-
-    if not tracks:
-        await callback.message.answer("❌ У клиента нет активных треков.")
-        return
-
-    # Формируем текст для клиента
-    text = f"📦 Обновление по вашим трекам (код: `{code}`):\n"
-    for item in tracks:
-        text += f"\n🔸 `{item['track']}`\n📍 Статус: *{item['status']}*\n"
-        if item["date"]:
-            text += f"📅 Дата: {item['date']}\n"
-        if item["signature"]:
-            text += f"✏️ Подпись: {item['signature']}\n"
-
-    try:
-        await bot.send_message(user_id, text, parse_mode="Markdown")
-        await callback.answer("📤 Уведомление отправлено клиенту")
-    except Exception as e:
-        await callback.message.answer(f"⚠️ Ошибка при отправке клиенту: {e}")
-
-# ✅ Команда /find_by_phone — найти все треки по номеру телефона
+# ✅ Команда /find_by_phone
 @router.message(Command("find_by_phone"))
 async def find_by_phone_command(message: Message, state: FSMContext):
     if str(message.from_user.id) not in MINI_ADMIN_IDS + ADMIN_IDS:
@@ -1292,7 +1294,6 @@ async def find_by_phone_command(message: Message, state: FSMContext):
 
     await state.set_state(FindByPhoneFSM.waiting_phone)
     await message.answer("🔍 Введите номер телефона клиента (в любом формате):")
-
 
 @router.message(FindByPhoneFSM.waiting_phone)
 async def process_phone(message: Message, state: FSMContext):
@@ -1323,82 +1324,32 @@ async def process_phone(message: Message, state: FSMContext):
         await message.answer("❌ Клиент с таким номером телефона не найден.")
         return
 
-    def search_by_user(sheet, status_text):
-        results = []
-        rows = sheet.get_all_values()[1:]
+    await send_tracks_by_user(message, user_id, f"по номеру: {phone_input}", manager_code)
+
+
+# ✅ Отправка клиенту — единая оптимизированная
+@router.callback_query(F.data.startswith("sendall:"))
+async def handle_send_all(callback: CallbackQuery):
+    _, user_id, code = callback.data.split(":")
+    user_id = str(user_id)
+
+    all_data = {
+        "Выдано": issued_sheet.get_all_values()[1:],
+        "На складе в КЗ": kz_sheet.get_all_values()[1:],
+        "В пути до Алматы": china_sheet.get_all_values()[1:]
+    }
+
+    tracks = []
+    seen = set()
+    for label, rows in all_data.items():
         for row in rows:
             if len(row) > 5 and row[5].strip() == user_id:
-                results.append({
-                    "track": row[0].strip().upper(),
-                    "status": status_text,
-                    "date": row[2] if len(row) > 2 else "",
-                    "signature": row[4] if len(row) > 4 else ""
-                })
-        return results
-
-    tracks = []
-    seen = set()
-    for sheet, label in [
-        (issued_sheet, "Выдано"),
-        (kz_sheet, "На складе в КЗ"),
-        (china_sheet, "В пути до Алматы")
-    ]:
-        results = search_by_user(sheet, label)
-        for item in results:
-            if item["track"] not in seen:
-                seen.add(item["track"])
-                tracks.append(item)
-
-    if not tracks:
-        await message.answer("📭 У клиента нет активных треков в таблицах.")
-        return
-
-    text = f"🔎 Найдено {len(tracks)} треков по номеру: {phone_input}\n🆔 Telegram ID клиента: {user_id}\n"
-    for item in tracks:
-        text += f"\n— `{item['track']}`\n📍 Статус: *{item['status']}*\n"
-        if item["date"]:
-            text += f"📅 Дата: {item['date']}\n"
-        if item["signature"]:
-            text += f"✏️ Подпись: {item['signature']}\n"
-
-    buttons = [
-        [InlineKeyboardButton(text="📋 Скопировать всё", callback_data=f"copyall_phone:{user_id}")],
-        [InlineKeyboardButton(text="📤 Отправить клиенту", callback_data=f"sendall_phone:{user_id}:{manager_code or 'unknown'}")]
-    ]
-    markup = InlineKeyboardMarkup(inline_keyboard=buttons)
-
-    await message.answer(text, parse_mode="Markdown", reply_markup=markup)
-
-@router.callback_query(F.data.startswith("copyall_phone:"))
-async def handle_copyall_phone(callback: CallbackQuery):
-    user_id = callback.data.split(":")[1]
-    await callback.answer("📋 Скопируйте список треков")
-    await callback.message.answer(f"Telegram ID клиента: `{user_id}`", parse_mode="Markdown")
-
-
-@router.callback_query(F.data.startswith("sendall_phone:"))
-async def handle_sendall_phone(callback: CallbackQuery):
-    _, user_id, code = callback.data.split(":")
-    user_id = int(user_id)
-
-    all_sheets = [
-        (issued_sheet, "Выдано"),
-        (kz_sheet, "На складе в КЗ"),
-        (china_sheet, "В пути до Алматы")
-    ]
-
-    tracks = []
-    seen = set()
-    for sheet, status in all_sheets:
-        records = sheet.get_all_values()[1:]
-        for row in records:
-            if len(row) > 5 and row[5].strip() == str(user_id):
                 track = row[0].strip().upper()
                 if track not in seen:
                     seen.add(track)
                     tracks.append({
                         "track": track,
-                        "status": status,
+                        "status": label,
                         "date": row[2] if len(row) > 2 else "",
                         "signature": row[4] if len(row) > 4 else ""
                     })
@@ -1407,7 +1358,7 @@ async def handle_sendall_phone(callback: CallbackQuery):
         await callback.message.answer("❌ У клиента нет активных треков.")
         return
 
-    text = f"📦 Обновление по вашим трекам (по номеру телефона):\n"
+    text = f"📦 Обновление по вашим трекам (код: `{code}`):\n"
     for item in tracks:
         text += f"\n🔸 `{item['track']}`\n📍 Статус: *{item['status']}*\n"
         if item["date"]:
@@ -1416,57 +1367,19 @@ async def handle_sendall_phone(callback: CallbackQuery):
             text += f"✏️ Подпись: {item['signature']}\n"
 
     try:
-        await bot.send_message(user_id, text, parse_mode="Markdown")
+        for i in range(0, len(text), 4000):
+            await bot.send_message(int(user_id), text[i:i+4000], parse_mode="Markdown")
         await callback.answer("📤 Уведомление отправлено клиенту")
     except Exception as e:
         await callback.message.answer(f"⚠️ Ошибка при отправке клиенту: {e}")
 
-# 🧨 Команда /stress_test
-@router.message(Command("stress_test"))
-async def stress_test_command(message: Message, state: FSMContext):
-    if str(message.from_user.id) not in ADMIN_IDS + MINI_ADMIN_IDS:
-        await message.answer("❌ Эта команда только для админов и мини-админов!")
-        return
 
-    await state.set_state(StressTestFSM.waiting_confirmation)
-    buttons = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Проверить устойчивость бота", callback_data="stress_yes"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="stress_no")
-        ]
-    ])
-    await message.answer("Вы действительно хотите начать стресс-тест стабильности бота?", reply_markup=buttons)
-
-# 🚫 Отмена
-@router.callback_query(F.data == "stress_no")
-async def cancel_stress_test(callback: CallbackQuery, state: FSMContext):
-    await callback.message.delete()
-    await state.clear()
-
-# 💥 Запуск фейкового краша
-@router.callback_query(F.data == "stress_yes")
-async def launch_stress_test(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_text("🧪 НАЧИНАЮ АНАЛИЗ СТАБИЛЬНОСТИ БОТА...")
-    await asyncio.sleep(12)
-
-    messages = [
-        "❗️ **КРИТИЧЕСКАЯ ОШИБКА: НЕУДАЛОСЬ ЗАГРУЗИТЬ core.memory**",
-        "⚠️ **AIROUTER НАРУШЕН: СТРЕСС-РЕЖИМ АКТИВИРОВАН**",
-        "🚫 **ПОДКЛЮЧЕНИЕ К TELEGRAM API ПРОПАЛО**",
-        "💣 **БОТ НЕ МОЖЕТ ПЕРЕЗАПУСТИТЬСЯ — КОД ОШИБКИ 127**",
-        "📉 **УТЕЧКА ПАМЯТИ В ОБЛАСТИ СЕРВИСА**",
-        "🔒 **СИСТЕМА АВТОРИЗАЦИИ ОТКЛЮЧЕНА**",
-        "💀 **ВКЛЮЧЁН АВАРИЙНЫЙ РЕЖИМ**",
-        "🧨 **УДАЛЕНИЕ ВСЕХ ДАННЫХ НАЧАТО...**"
-    ]
-
-    for msg in messages:
-        await callback.message.answer(msg, parse_mode="Markdown")
-        await asyncio.sleep(1)
-
-    await asyncio.sleep(7)
-    await callback.message.answer("😄 Это была шутка! Бот работает стабильно. Но ты неплохо занервничал 😁")
+# ✅ Обработка копирования всех треков
+@router.callback_query(F.data.startswith("copyall:"))
+async def handle_copy_all(callback: CallbackQuery):
+    code = callback.data.split(":")[1]
+    await callback.answer("📋 Скопируйте список треков")
+    await callback.message.answer(f"Код клиента: `{code}`", parse_mode="Markdown")
 
 
 async def main():
