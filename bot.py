@@ -199,12 +199,6 @@ async def set_bot_commands():
 # 🔹 Обработчики команд
 # ==========================
 
-pending_notifications = pending_notifications if 'pending_notifications' in globals() else {
-    "china": [],
-    "kz": [],
-    "push": []
-}
-
 # ✅ /start
 @router.message(F.text == "/start")
 async def start_handler(message: Message):
@@ -586,6 +580,9 @@ async def send_push_notifications(admin_id: int):
 
     pending_notifications["push"] = []
 
+    # 🛡️ Глобальные переменные (если ещё не добавлены)
+is_notifying = is_notifying if 'is_notifying' in globals() else {"china": False, "kz": False}
+pending_notifications = pending_notifications if 'pending_notifications' in globals() else {"china": [], "kz": []}
 
 
 
