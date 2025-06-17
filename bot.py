@@ -195,6 +195,13 @@ async def set_bot_commands():
         await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=admin_id))
 
 
+pending_notifications = pending_notifications if 'pending_notifications' in globals() else {
+    "china": [],
+    "kz": [],
+    "push": []
+}
+
+
 # ==========================
 # 🔹 Обработчики команд
 # ==========================
@@ -531,9 +538,12 @@ async def contact_manager_handler(message: Message):
 
     await message.answer(text, parse_mode="Markdown", disable_web_page_preview=True)
 
+# ✅ /push – массовая рассылка (только для админа)
+from aiogram.fsm.state import StatesGroup, State
 
+class PushNotification(StatesGroup):
+    awaiting_message = State()
 
-# ✅ PUSH — FSM + отложенная фоновая отправка
 @router.message(Command("push"))
 async def start_push_handler(message: Message, state: FSMContext):
     if str(message.from_user.id) not in ADMIN_IDS:
@@ -579,12 +589,6 @@ async def send_push_notifications(admin_id: int):
         pass
 
     pending_notifications["push"] = []
-
-    # 🛡️ Глобальные переменные (если ещё не добавлены)
-is_notifying = is_notifying if 'is_notifying' in globals() else {"china": False, "kz": False}
-pending_notifications = pending_notifications if 'pending_notifications' in globals() else {"china": [], "kz": []}
-
-
 
 
 # ✅ Отправка уведомлений по КАЗАХСТАНУ — сначала batch-обновление, потом уведомления
