@@ -199,6 +199,12 @@ async def set_bot_commands():
 # 🔹 Обработчики команд
 # ==========================
 
+pending_notifications = pending_notifications if 'pending_notifications' in globals() else {
+    "china": [],
+    "kz": [],
+    "push": []
+}
+
 # ✅ /start
 @router.message(F.text == "/start")
 async def start_handler(message: Message):
@@ -533,42 +539,55 @@ async def contact_manager_handler(message: Message):
 
 
 
-# ✅ /push – массовая рассылка (только для админа)
-from aiogram.fsm.state import StatesGroup, State
-
-class PushNotification(StatesGroup):
-    awaiting_message = State()
-
-@router.message(F.text == "/push")
+# ✅ PUSH — FSM + отложенная фоновая отправка
+@router.message(Command("push"))
 async def start_push_handler(message: Message, state: FSMContext):
     if str(message.from_user.id) not in ADMIN_IDS:
         await message.answer("❌ У вас нет прав для этой команды!")
         return
 
     await state.set_state(PushNotification.awaiting_message)
-    await message.answer("✉️ Введите сообщение для рассылки:")
+    await message.answer("✉️ Введите сообщение для рассылки всем пользователям:")
 
 @router.message(PushNotification.awaiting_message)
-async def send_push_handler(message: Message, state: FSMContext):
+async def handle_push_message(message: Message, state: FSMContext):
     push_text = message.text.strip()
+    await state.clear()
 
-    # Получаем всех пользователей из таблицы
-    user_ids = users_sheet.col_values(1)  # Первый столбец — user_id
-    sent_count = 0
+    user_ids = users_sheet.col_values(1)[1:]  # Пропускаем заголовок
+    pending_notifications["push"] = [{"user_id": uid, "text": push_text} for uid in user_ids]
 
-    for user_id in user_ids[1:]:  # Пропускаем заголовок таблицы
+    await message.answer(f"👥 Найдено {len(user_ids)} пользователей. Начинаю рассылку...")
+
+    # Фоновая задача
+    asyncio.create_task(send_push_notifications(message.from_user.id))
+
+
+# 🛠️ Фоновая функция рассылки
+async def send_push_notifications(admin_id: int):
+    notifications = pending_notifications.get("push", [])
+    if not notifications: return
+
+    sent, failed = 0, 0
+    for item in notifications:
         try:
-            await bot.send_message(user_id, push_text)
-            sent_count += 1
+            await bot.send_message(item["user_id"], item["text"])
+            sent += 1
+            await asyncio.sleep(0.3)
         except Exception as e:
-            logging.warning(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
+            logging.warning(f"❌ Ошибка push-рассылки {item['user_id']}: {e}")
+            failed += 1
 
-    await message.answer(f"✅ Уведомление отправлено {sent_count} пользователям.")
-    await state.clear()  # Очищаем состояние FSM
+    # Отчёт админу
+    try:
+        await bot.send_message(admin_id, f"✅ PUSH завершён:\n📤 Отправлено: {sent}\n⚠️ Ошибок: {failed}")
+    except:
+        pass
 
-    # 🛡️ Глобальные переменные (если ещё не добавлены)
-is_notifying = is_notifying if 'is_notifying' in globals() else {"china": False, "kz": False}
-pending_notifications = pending_notifications if 'pending_notifications' in globals() else {"china": [], "kz": []}
+    pending_notifications["push"] = []
+
+
+
 
 
 # ✅ Отправка уведомлений по КАЗАХСТАНУ — сначала batch-обновление, потом уведомления
