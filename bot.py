@@ -333,6 +333,16 @@ async def check_status_handler(message: Message):
         logging.error(f"[STATUS] Ошибка при отправке сообщения: {e}")
         await message.answer("❌ Ошибка при отправке статуса. Возможно, сообщение слишком длинное.")
 
+# Определяем состояния FSM (Добавь в начало файла)
+class TrackSigning(StatesGroup):
+    selecting_track = State()
+    entering_signature = State()
+
+
+
+# Хранилище активных пользователей в процессе FSM
+active_states = {}
+
 # ✅ Подписать трек-номер
 @router.message(F.text.in_(["🖊 Подписать трек-номер", "/sign_track"]))
 async def sign_track_handler(message: Message, state: FSMContext):
