@@ -320,11 +320,12 @@ async def check_status_handler(message: Message):
     user_tracks.sort(key=lambda x: ["🟠", "🔵", "🟢", "✅"].index(x[0]))
 
     # Собираем текст
-    text = get_text("status_header") + "\n"
-    for indicator, status, track_number, date, signature in user_tracks:
+    text = f"📦 Статусы ваших треков:\n🔍 Найдено {len(user_tracks)}:\n\n"
+    for indicator, status, track, date, signature in user_tracks:
         date_part = f" ({date})" if date else ""
-        signature_part = f" ({signature})" if signature != "Без подписи" else ""
-        text += f"{indicator} {status}: {track_number}{date_part}{signature_part}\n"
+        sig_part = f" ({signature})" if signature.strip().lower() not in ["", "без подписи"] else ""
+        text += f"{indicator} {status}: `{track}`{date_part}{sig_part}\n"
+
 
     # Отправляем результат пользователю
     try:
