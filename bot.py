@@ -449,6 +449,9 @@ async def process_signature(message: Message, state: FSMContext):
     await message.answer("❌ Не удалось найти трек-номер. Введите /отмена и начните заново.")
     await state.clear()
 
+class TrackDeleting(StatesGroup):
+    selecting_track = State()
+
 # ✅ Удалить трек-номер
 @router.message(F.text.in_("❌ Удалить трек-номер", "/delete_track"))
 async def delete_track_handler(message: Message, state: FSMContext):
