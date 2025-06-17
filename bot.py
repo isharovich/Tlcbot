@@ -461,16 +461,24 @@ async def delete_track_handler(message: Message, state: FSMContext):
 
     await state.clear()
 
-    # Получаем треки пользователя
+    try:
+        tracking_data = tracking_sheet.get_all_values()[1:]  # ✅ загружаем один раз
+    except Exception as e:
+        logging.error(f"[DELETE] Ошибка при загрузке треков: {e}")
+        await message.answer("❌ Не удалось загрузить треки. Попробуйте позже.")
+        return
+
     user_tracks = [
         row[0].strip().upper()
-        for row in tracking_sheet.get_all_values()
+        for row in tracking_data
         if len(row) > 4 and row[4] == user_id
     ]
 
     if not user_tracks:
         await message.answer("📭 У вас нет активных трек-номеров.")
         return
+
+    await state.update_data(tracking_data=tracking_data)
 
     keyboard = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=track)] for track in user_tracks],
@@ -484,18 +492,27 @@ async def delete_track_handler(message: Message, state: FSMContext):
 
 
 
+
 @router.message(TrackDeleting.selecting_track)
 async def confirm_deletion(message: Message, state: FSMContext):
-    
     user_id = str(message.from_user.id)
     track_to_delete = message.text.strip().upper()
 
-    records = tracking_sheet.get_all_values()
+    data = await state.get_data()
+    tracking_data = data.get("tracking_data", [])
 
-    for i, row in enumerate(records):
-        if row[0].strip().upper() == track_to_delete and len(row) > 4 and row[4] == user_id:
-            tracking_sheet.delete_rows(i + 1)
-            await message.answer(f"✅ Трек-номер {track_to_delete} удалён.", reply_markup=user_keyboard)
+    for i, row in enumerate(tracking_data):
+        if (
+            len(row) > 4
+            and row[0].strip().upper() == track_to_delete
+            and row[4] == user_id
+        ):
+            try:
+                tracking_sheet.delete_rows(i + 2)  # +2 — т.к. заголовок пропущен
+                await message.answer(f"✅ Трек-номер {track_to_delete} удалён.", reply_markup=user_keyboard)
+            except Exception as e:
+                logging.error(f"[DELETE] Ошибка при удалении трека: {e}")
+                await message.answer("❌ Не удалось удалить трек. Попробуйте позже.")
             await state.clear()
             return
 
