@@ -279,67 +279,85 @@ async def register_manager_handler(message: Message, state: FSMContext):
     await state.clear()
 
 
-# ✅ /check_status – проверка треков (Оптимизированная версия)
 @router.message(F.text.in_(["📦 Проверить статус посылок", "/check_status"]))
 async def check_status_handler(message: Message):
     user_id = str(message.from_user.id)
-    
-    # Загружаем все данные
-    tracking_records = tracking_sheet.get_all_values()
-    china_records = {row[0].strip().lower(): row[2] for row in china_sheet.get_all_values()[1:] if len(row) > 2}  # Китай (трек -> дата)
-    kz_records = {row[0].strip().lower(): row[2] for row in kz_sheet.get_all_values()[1:] if len(row) > 2}  # Казахстан (трек -> дата)
-    issued_records = {row[0].strip().lower(): row[2] for row in issued_sheet.get_all_values()[1:] if len(row) > 2}  # Выданное (трек -> дата)
+    logging.info(f"🛠️ /check_status от {user_id}")
 
-    user_tracks = []
-    
-    # Находим все треки пользователя
-    for row in tracking_records[1:]:
-        if len(row) > 4 and row[4] == user_id:  # Проверяем ID пользователя в 5-й колонке
-            track_number = row[0].strip().lower()  # Трек-номер
-            signature = row[3] if len(row) > 3 else ""
+    try:
+        tracking_records = tracking_sheet.get_all_values()
+        china_data = china_sheet.get_all_values()[1:]
+        kz_data = kz_sheet.get_all_values()[1:]
+        issued_data = issued_sheet.get_all_values()[1:]
 
-            # Определяем статус, дату и индикатор
-            if track_number in issued_records:
-                indicator, status = "✅", "Выдана"
-                date = issued_records[track_number]
-            elif track_number in kz_records:
-                indicator, status = "🟢", "Прибыла в Казахстан"
-                date = kz_records[track_number]
-            elif track_number in china_records:
-                indicator, status = "🔵", "В пути до Алматы"
-                date = china_records[track_number]
-            else:
-                indicator, status = "🟠", "Ожидается на складе в Китае"
-                date = ""
+        china_records = {row[0].strip().lower(): row[2] for row in china_data if len(row) > 2}
+        kz_records = {row[0].strip().lower(): row[2] for row in kz_data if len(row) > 2}
+        issued_records = {row[0].strip().lower(): row[2] for row in issued_data if len(row) > 2}
 
-            # Добавляем трек в список
-            user_tracks.append((indicator, status, track_number.upper(), date, signature))
+        user_tracks = []
+        for row in tracking_records[1:]:
+            if len(row) > 4 and row[4] == user_id:
+                track_number = row[0].strip().lower()
+                signature = row[3] if len(row) > 3 else ""
 
-    # Сортируем список: 🟠 Трекинг → 🔵 Китай → 🟢 Казахстан → ✅ Выданное
-    user_tracks.sort(key=lambda x: ["🟠", "🔵", "🟢", "✅"].index(x[0]))
+                if track_number in issued_records:
+                    indicator, status = "✅", "Выдана"
+                    date = issued_records[track_number]
+                elif track_number in kz_records:
+                    indicator, status = "🟢", "Прибыла в Казахстан"
+                    date = kz_records[track_number]
+                elif track_number in china_records:
+                    indicator, status = "🔵", "В пути до Алматы"
+                    date = china_records[track_number]
+                else:
+                    indicator, status = "🟠", "Ожидается на складе в Китае"
+                    date = ""
 
-    # Формируем текст ответа
-    if not user_tracks:
-        await message.answer("📭 У вас нет активных трек-номеров.")
-        return
+                user_tracks.append((indicator, status, track_number.upper(), date, signature))
 
-    text = get_text("status_header") + "\n"
-    for indicator, status, track_number, date, signature in user_tracks:
-        date_part = f" ({date})" if date else ""
-        signature_part = f" ({signature})" if signature != "Без подписи" else ""
-        text += f"{indicator} {status}: {track_number}{date_part}{signature_part}\n"
+        if not user_tracks:
+            await message.answer("📭 У вас нет активных трек-номеров.")
+            return
 
-    await message.answer(text)
+        user_tracks.sort(key=lambda x: ["🟠", "🔵", "🟢", "✅"].index(x[0]))
 
-# Определяем состояния FSM (Добавь в начало файла)
-class TrackSigning(StatesGroup):
-    selecting_track = State()
-    entering_signature = State()
+        header = "📦 СТАТУСЫ ВАШИХ ПОСЫЛОК:\n"
+        lines = []
+        for indicator, status, track, date, signature in user_tracks:
+            line = f"{indicator} {status}: {track}"
+            if date:
+                line += f" ({date})"
+            if signature and signature != "Без подписи":
+                line += f" ({signature})"
+            lines.append(line)
 
+        MAX_LENGTH = 4000
+        chunk = header
+        for line in lines:
+            if len(chunk) + len(line) + 1 > MAX_LENGTH:
+                try:
+                    await message.answer(chunk)
+                except Exception as e:
+                    logging.exception(f"❌ Ошибка при отправке части сообщения: {e}")
+                chunk = header  # 💥 ключевой момент: нужно сбросить заголовок!
+            chunk += line + "\n"
+        if chunk.strip():
+            try:
+                await message.answer(chunk)
+            except Exception as e:
+                logging.exception(f"❌ Ошибка при финальной отправке: {e}")
 
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="🖊 Подписать трек-номер"), KeyboardButton(text="❌ Удалить трек-номер")]
+            ],
+            resize_keyboard=True
+        )
+        await message.answer("🔧 Вы можете выбрать, что сделать с треком:", reply_markup=keyboard)
 
-# Хранилище активных пользователей в процессе FSM
-active_states = {}
+    except Exception as e:
+        logging.exception("🔥 Ошибка в check_status_handler")
+        await message.answer("⚠️ Ошибка при получении статуса. Попробуйте позже.")
 
 # ✅ Подписать трек-номер
 @router.message(F.text.in_(["🖊 Подписать трек-номер", "/sign_track"]))
