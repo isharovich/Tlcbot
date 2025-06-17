@@ -344,15 +344,22 @@ class TrackSigning(StatesGroup):
 active_states = {}
 
 # ✅ Подписать трек-номер
-@router.message(F.text.in_("🖊 Подписать трек-номер", "/sign_track"))
+@router.message(F.text.in_(["🖊 Подписать трек-номер", "/sign_track"]))
 async def sign_track_handler(message: Message, state: FSMContext):
     user_id = str(message.from_user.id)
+
+    # Предотвращаем повторный запуск FSM
+    current_state = await state.get_state()
+    if current_state is not None:
+        await message.answer("⏳ Пожалуйста, завершите предыдущее действие или введите /отмена.")
+        return
+
     await state.clear()
 
-    records = tracking_sheet.get_all_values()
+    # Получаем треки пользователя
     user_tracks = [
         row[0].strip().upper()
-        for row in records
+        for row in tracking_sheet.get_all_values()
         if len(row) > 4 and row[4] == user_id
     ]
 
@@ -360,74 +367,46 @@ async def sign_track_handler(message: Message, state: FSMContext):
         await message.answer("📭 У вас нет активных трек-номеров.")
         return
 
-    # Сохраняем треки и начальную страницу в FSM
-    await state.update_data(user_tracks=user_tracks, page=0)
-    await state.set_state(TrackSigning.selecting_track)
-    await show_track_page(message, state)
-
-
-async def show_track_page(message: Message, state: FSMContext):
-    data = await state.get_data()
-    user_tracks = data.get("user_tracks", [])
-    page = data.get("page", 0)
-
-    per_page = 5
-    total_pages = (len(user_tracks) + per_page - 1) // per_page
-    start = page * per_page
-    end = start + per_page
-    page_tracks = user_tracks[start:end]
-
-    keyboard = [[KeyboardButton(text=track)] for track in page_tracks]
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(KeyboardButton(text="◀️ Назад"))
-    if page < total_pages - 1:
-        nav_buttons.append(KeyboardButton(text="▶️ Далее"))
-    if nav_buttons:
-        keyboard.append(nav_buttons)
-
-    reply_kb = ReplyKeyboardMarkup(
-        keyboard=keyboard,
+    # Создаем клавиатуру с треками
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=track)] for track in user_tracks],
         resize_keyboard=True,
-        one_time_keyboard=False
+        one_time_keyboard=True
     )
 
-    await message.answer(
-        f"✏️ Выберите трек-номер для подписи (стр. {page+1}/{total_pages}):",
-        reply_markup=reply_kb
-    )
+    await state.set_state(TrackSigning.selecting_track)
+    await asyncio.sleep(0.1)
+    await message.answer("✏️ Выберите трек-номер, который хотите подписать:", reply_markup=keyboard)
 
 
+# Обработка выбора трека
 @router.message(TrackSigning.selecting_track)
 async def process_track_selection(message: Message, state: FSMContext):
-    text = message.text.strip().upper()
+   
+    
+    selected_track = message.text.strip().upper()
+    user_id = str(message.from_user.id)
 
-    if text == "◀️ НАЗАД" or text == "▶️ ДАЛЕЕ":
-        data = await state.get_data()
-        page = data.get("page", 0)
-        if text == "◀️ НАЗАД":
-            page = max(0, page - 1)
-        else:
-            page = page + 1
-        await state.update_data(page=page)
-        await show_track_page(message, state)
-        return
+    # Проверка, есть ли трек у пользователя
+    user_tracks = [
+        row[0].strip().upper()
+        for row in tracking_sheet.get_all_values()
+        if len(row) > 4 and row[4] == user_id
+    ]
 
-    data = await state.get_data()
-    user_tracks = data.get("user_tracks", [])
-
-    if text not in user_tracks:
+    if selected_track not in user_tracks:
         await message.answer("❌ Такой трек не найден. Пожалуйста, выберите один из списка.")
         return
 
-    await state.update_data(selected_track=text)
+    await state.update_data(selected_track=selected_track)
     await state.set_state(TrackSigning.entering_signature)
     await asyncio.sleep(0.1)
     await message.answer("✏️ Введите подпись для выбранного трек-номера:", reply_markup=ReplyKeyboardRemove())
 
-
+# Обработка подписи
 @router.message(TrackSigning.entering_signature)
 async def process_signature(message: Message, state: FSMContext):
+   
     user_id = str(message.from_user.id)
     data = await state.get_data()
     selected_track = data.get("selected_track")
@@ -438,10 +417,11 @@ async def process_signature(message: Message, state: FSMContext):
         await state.clear()
         return
 
+    # Обновляем подпись в таблице
     records = tracking_sheet.get_all_values()
     for i, row in enumerate(records):
         if row[0].strip().upper() == selected_track and len(row) > 4 and row[4] == user_id:
-            tracking_sheet.update_cell(i + 1, 4, signature)
+            tracking_sheet.update_cell(i + 1, 4, signature)  # Столбец D — подпись
             await message.answer(f"✅ Подпись обновлена для {selected_track}: {signature}")
             await state.clear()
             return
@@ -449,19 +429,26 @@ async def process_signature(message: Message, state: FSMContext):
     await message.answer("❌ Не удалось найти трек-номер. Введите /отмена и начните заново.")
     await state.clear()
 
+    
 class TrackDeleting(StatesGroup):
     selecting_track = State()
 
 # ✅ Удалить трек-номер
-@router.message(F.text.in_("❌ Удалить трек-номер", "/delete_track"))
+@router.message(F.text.in_(["❌ Удалить трек-номер", "/delete_track"]))
 async def delete_track_handler(message: Message, state: FSMContext):
     user_id = str(message.from_user.id)
+
+    current_state = await state.get_state()
+    if current_state is not None:
+        await message.answer("⏳ Завершите предыдущее действие или введите /отмена.")
+        return
+
     await state.clear()
 
-    records = tracking_sheet.get_all_values()
+    # Получаем треки пользователя
     user_tracks = [
         row[0].strip().upper()
-        for row in records
+        for row in tracking_sheet.get_all_values()
         if len(row) > 4 and row[4] == user_id
     ]
 
@@ -469,69 +456,35 @@ async def delete_track_handler(message: Message, state: FSMContext):
         await message.answer("📭 У вас нет активных трек-номеров.")
         return
 
-    await state.update_data(user_tracks=user_tracks, page=0)
-    await state.set_state(TrackDeleting.selecting_track)
-    await show_delete_page(message, state)
-
-
-async def show_delete_page(message: Message, state: FSMContext):
-    data = await state.get_data()
-    user_tracks = data.get("user_tracks", [])
-    page = data.get("page", 0)
-
-    per_page = 5
-    total_pages = (len(user_tracks) + per_page - 1) // per_page
-    start = page * per_page
-    end = start + per_page
-    page_tracks = user_tracks[start:end]
-
-    keyboard = [[KeyboardButton(text=track)] for track in page_tracks]
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(KeyboardButton(text="◀️ Назад"))
-    if page < total_pages - 1:
-        nav_buttons.append(KeyboardButton(text="▶️ Далее"))
-    if nav_buttons:
-        keyboard.append(nav_buttons)
-
-    reply_kb = ReplyKeyboardMarkup(
-        keyboard=keyboard,
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=track)] for track in user_tracks],
         resize_keyboard=True,
-        one_time_keyboard=False
+        one_time_keyboard=True
     )
 
-    await message.answer(
-        f"❌ Выберите трек-номер для удаления (стр. {page+1}/{total_pages}):",
-        reply_markup=reply_kb
-    )
+    await state.set_state(TrackDeleting.selecting_track)
+    await asyncio.sleep(0.1)
+    await message.answer("❌ Выберите трек-номер, который хотите удалить:", reply_markup=keyboard)
+
 
 
 @router.message(TrackDeleting.selecting_track)
 async def confirm_deletion(message: Message, state: FSMContext):
-    text = message.text.strip().upper()
-
-    if text == "◀️ НАЗАД" or text == "▶️ ДАЛЕЕ":
-        data = await state.get_data()
-        page = data.get("page", 0)
-        if text == "◀️ НАЗАД":
-            page = max(0, page - 1)
-        else:
-            page = page + 1
-        await state.update_data(page=page)
-        await show_delete_page(message, state)
-        return
-
+    
     user_id = str(message.from_user.id)
+    track_to_delete = message.text.strip().upper()
+
     records = tracking_sheet.get_all_values()
 
     for i, row in enumerate(records):
-        if row[0].strip().upper() == text and len(row) > 4 and row[4] == user_id:
+        if row[0].strip().upper() == track_to_delete and len(row) > 4 and row[4] == user_id:
             tracking_sheet.delete_rows(i + 1)
-            await message.answer(f"✅ Трек-номер {text} удалён.", reply_markup=user_keyboard)
+            await message.answer(f"✅ Трек-номер {track_to_delete} удалён.", reply_markup=user_keyboard)
             await state.clear()
             return
 
     await message.answer("❌ Не удалось найти трек-номер. Пожалуйста, выберите из списка или введите /отмена.")
+
 
 
 # ✅ /contact_manager – связь с менеджером
