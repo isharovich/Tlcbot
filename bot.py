@@ -323,8 +323,8 @@ async def check_status_handler(message: Message):
     text = f"📦 Статусы ваших треков:\n🔍 Найдено {len(user_tracks)}:\n\n"
     for indicator, status, track, date, signature in user_tracks:
         date_part = f" ({date})" if date else ""
-        sig_part = f" ✏️ {signature}" if signature and signature.lower() != "без подписи" else ""
-        text += f"{indicator} `{track}`\n📍 {status}{date_part}{sig_part}\n\n"
+        sig_part = f" ({signature})" if signature.strip().lower() not in ["", "без подписи"] else ""
+        text += f"{indicator} {status}: {track}{date_part}{sig_part}\n"
 
     # Отправляем результат пользователю
     try:
