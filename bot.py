@@ -334,12 +334,14 @@ async def check_status_handler(message: Message):
         text += f"{indicator} {status}: `{track}`{date_part}{sig_part}\n"
 
 
-    # Отправляем результат пользователю
+        # Отправляем результат частями (если слишком длинное)
     try:
-        await message.answer(text.strip(), parse_mode="Markdown")
+        chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
+        for part in chunks:
+            await message.answer(part.strip(), parse_mode="Markdown")
     except Exception as e:
         logging.error(f"[STATUS] Ошибка при отправке сообщения: {e}")
-        await message.answer("❌ Ошибка при отправке статуса. Возможно, сообщение слишком длинное.")
+
 
 # Определяем состояния FSM (Добавь в начало файла)
 class TrackSigning(StatesGroup):
