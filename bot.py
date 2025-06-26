@@ -333,14 +333,20 @@ async def check_status_handler(message: Message):
         sig_part = f" ({signature})" if signature.strip().lower() not in ["", "без подписи"] else ""
         text += f"{indicator} {status}: `{track}`{date_part}{sig_part}\n"
 
-
-        # Отправляем результат частями (если слишком длинное)
+    # Отправляем результат безопасно по строкам
     try:
-        chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
-        for part in chunks:
-            await message.answer(part.strip(), parse_mode="Markdown")
+        lines = text.strip().split('\n')
+        chunk = ""
+        for line in lines:
+            if len(chunk) + len(line) + 1 > 4000:
+                await message.answer(chunk.strip(), parse_mode="Markdown")
+                chunk = ""
+            chunk += line + "\n"
+        if chunk:
+            await message.answer(chunk.strip(), parse_mode="Markdown")
     except Exception as e:
         logging.error(f"[STATUS] Ошибка при отправке сообщения: {e}")
+
 
 
 # Определяем состояния FSM (Добавь в начало файла)
