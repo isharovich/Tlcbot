@@ -174,7 +174,6 @@ MINI_ADMIN_COMMANDS = USER_COMMANDS + [
     BotCommand(command="find_track", description="🔍 Поиск трека по цифрам"),
     BotCommand(command="find_by_code", description="🔍 Поиск треков по коду"),
     BotCommand(command="find_by_phone", description="🔍 Поиск по номеру телефона"),
-    BotCommand(command="stress_test", description="💥 Проверка устойчивости бота"),
 ]
 
 ADMIN_COMMANDS = MINI_ADMIN_COMMANDS + [
@@ -1507,31 +1506,6 @@ async def stress_test_command(message: Message, state: FSMContext):
 async def cancel_stress_test(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     await state.clear()
-
-# 💥 Запуск фейкового краша
-@router.callback_query(F.data == "stress_yes")
-async def launch_stress_test(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_text("🧪 НАЧИНАЮ АНАЛИЗ СТАБИЛЬНОСТИ БОТА...")
-    await asyncio.sleep(12)
-
-    messages = [
-        "❗️ **КРИТИЧЕСКАЯ ОШИБКА: НЕУДАЛОСЬ ЗАГРУЗИТЬ core.memory**",
-        "⚠️ **AIROUTER НАРУШЕН: СТРЕСС-РЕЖИМ АКТИВИРОВАН**",
-        "🚫 **ПОДКЛЮЧЕНИЕ К TELEGRAM API ПРОПАЛО**",
-        "💣 **БОТ НЕ МОЖЕТ ПЕРЕЗАПУСТИТЬСЯ — КОД ОШИБКИ 127**",
-        "📉 **УТЕЧКА ПАМЯТИ В ОБЛАСТИ СЕРВИСА**",
-        "🔒 **СИСТЕМА АВТОРИЗАЦИИ ОТКЛЮЧЕНА**",
-        "💀 **ВКЛЮЧЁН АВАРИЙНЫЙ РЕЖИМ**",
-        "🧨 **УДАЛЕНИЕ ВСЕХ ДАННЫХ НАЧАТО...**"
-    ]
-
-    for msg in messages:
-        await callback.message.answer(msg, parse_mode="Markdown")
-        await asyncio.sleep(1)
-
-    await asyncio.sleep(7)
-    await callback.message.answer("😄 Это была шутка! Бот работает стабильно. Но ты неплохо занервничал 😁")
 
 
 async def main():
