@@ -1087,9 +1087,10 @@ async def add_tracking_handler(message: Message, state: FSMContext):
 
     # Добавляем в "Трекинг"
     tracking_sheet.append_row(
-        [track_number, current_date, manager_code, signature, user_id],
+        [track_number, current_date, manager_code, signature, user_id, ""] + [""] * 20,
         value_input_option="USER_ENTERED"
     )
+
 
     await message.answer(f"✅ Трек-номер {track_number} сохранён{' с подписью: ' + signature if signature else ''}.")
 
@@ -1512,21 +1513,6 @@ async def handle_sendall_phone(callback: CallbackQuery):
     except Exception as e:
         await callback.message.answer(f"⚠️ Ошибка при отправке клиенту: {e}")
 
-# 🧨 Команда /stress_test
-@router.message(Command("stress_test"))
-async def stress_test_command(message: Message, state: FSMContext):
-    if str(message.from_user.id) not in ADMIN_IDS + MINI_ADMIN_IDS:
-        await message.answer("❌ Эта команда только для админов и мини-админов!")
-        return
-
-    await state.set_state(StressTestFSM.waiting_confirmation)
-    buttons = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Проверить устойчивость бота", callback_data="stress_yes"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="stress_no")
-        ]
-    ])
-    await message.answer("Вы действительно хотите начать стресс-тест стабильности бота?", reply_markup=buttons)
 
 # 🚫 Отмена
 @router.callback_query(F.data == "stress_no")
