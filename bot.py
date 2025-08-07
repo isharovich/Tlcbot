@@ -17,7 +17,8 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQu
 from aiogram.filters import StateFilter
 from dotenv import load_dotenv
 import os
-
+from dotenv import load_dotenv
+load_dotenv()
 
 from logging.handlers import RotatingFileHandler
 
