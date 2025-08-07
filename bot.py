@@ -41,7 +41,7 @@ logging.basicConfig(
 # 🔹 Настройки бота и таблицы
 # ==========================
 
-TOKEN = "6974697621:AAFi2tGY--pyRPCfdfTEH_G63cSp7OeLgkM"
+TOKEN = os.getenv
 SHEET_ID = "1QaR920L5bZUGNLk02M-lgXr9c5_nHJQVoPgPL7UVVY4"
 ADMIN_IDS = ["665932047", "473541446", "5181691179"]  # Telegram ID админа
 MINI_ADMIN_IDS = ["914265474", "1285622060", "632325004",]  # ← здесь реальные Telegram ID
