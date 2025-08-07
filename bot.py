@@ -971,7 +971,7 @@ async def check_issued_handler(message: Message):
             for i, row in enumerate(tracking_data, start=2):  # i = строка в таблице
                 if len(row) > 0 and row[0].strip().lower() == track:
                     tracking_updates.append({
-                        "range": f"G{i}",  # Столбец G — колонка галочек
+                        "range": f"F{i}",  # Столбец G — колонка галочек
                         "values": [["✅"]]
                     })
                     break
