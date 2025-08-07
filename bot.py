@@ -960,7 +960,28 @@ async def check_issued_handler(message: Message):
         logging.warning(f"ISS Ошибка обновления таблицы: {e}")
         await message.answer("⚠️ Ошибка при обновлении таблицы!")
         return
-        
+
+    # 🟢 ДОБАВЛЯЕМ ГАЛОЧКИ В "Трекинг"
+    try:
+        tracking_data = tracking_sheet.get_all_values()[1:]  # Без заголовков
+        tracking_updates = []
+
+        for item in notif:
+            track = item["track"].strip().lower()
+            for i, row in enumerate(tracking_data, start=2):  # i = строка в таблице
+                if len(row) > 0 and row[0].strip().lower() == track:
+                    tracking_updates.append({
+                        "range": f"G{i}",  # Столбец G — колонка галочек
+                        "values": [["✅"]]
+                    })
+                    break
+
+        if tracking_updates:
+            tracking_sheet.batch_update(tracking_updates)
+            logging.info(f"✅ В 'Трекинг' добавлены галочки: {len(tracking_updates)} строк.")
+    except Exception as e:
+        logging.warning(f"❌ Ошибка при обновлении 'Трекинг': {e}")
+    
 
 
     with open("pending_issued.json", "w") as f:
