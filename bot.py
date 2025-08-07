@@ -15,6 +15,9 @@ from collections import defaultdict, deque
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from aiogram.filters import StateFilter
+from dotenv import load_dotenv
+import os
+
 
 from logging.handlers import RotatingFileHandler
 
@@ -38,7 +41,7 @@ logging.basicConfig(
 # 🔹 Настройки бота и таблицы
 # ==========================
 
-TOKEN = "6974697621:AAHM4qa91k4nq4Hsbn-rSDTkL8-6hAsa3pA"  # Укажи свой токен прямо в коде или загрузи из переменной окружения
+TOKEN = "6974697621:AAFi2tGY--pyRPCfdfTEH_G63cSp7OeLgkM"
 SHEET_ID = "1QaR920L5bZUGNLk02M-lgXr9c5_nHJQVoPgPL7UVVY4"
 ADMIN_IDS = ["665932047", "473541446", "5181691179"]  # Telegram ID админа
 MINI_ADMIN_IDS = ["914265474", "1285622060", "632325004",]  # ← здесь реальные Telegram ID
@@ -956,6 +959,28 @@ async def check_issued_handler(message: Message):
         logging.warning(f"ISS Ошибка обновления таблицы: {e}")
         await message.answer("⚠️ Ошибка при обновлении таблицы!")
         return
+        
+    # 🟢 ДОБАВЛЯЕМ ГАЛОЧКИ В "Трекинг"
+    try:
+        tracking_data = tracking_sheet.get_all_values()[1:]  # Без заголовков
+        tracking_updates = []
+
+        for item in notif:
+            track = item["track"].strip().lower()
+            for i, row in enumerate(tracking_data, start=2):  # i = строка в таблице
+                if len(row) > 0 and row[0].strip().lower() == track:
+                    tracking_updates.append({
+                        "range": f"G{i}",  # Столбец G — колонка галочек
+                        "values": [["✅"]]
+                    })
+                    break
+
+        if tracking_updates:
+            tracking_sheet.batch_update(tracking_updates)
+            logging.info(f"✅ В 'Трекинг' добавлены галочки: {len(tracking_updates)} строк.")
+    except Exception as e:
+        logging.warning(f"❌ Ошибка при обновлении 'Трекинг': {e}")
+
 
     with open("pending_issued.json", "w") as f:
         json.dump(notif, f)
