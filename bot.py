@@ -17,10 +17,10 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQu
 from aiogram.filters import StateFilter
 from dotenv import load_dotenv
 import os
-from dotenv import load_dotenv
-load_dotenv()
-
 from logging.handlers import RotatingFileHandler
+from dotenv import load_dotenv
+
+load_dotenv()  # Загружаем .env файл
 
 # 🔧 Настройка логирования с ротацией
 log_handler = RotatingFileHandler(
@@ -42,7 +42,7 @@ logging.basicConfig(
 # 🔹 Настройки бота и таблицы
 # ==========================
 
-TOKEN = os.getenv
+TOKEN = os.getenv("TOKEN")
 SHEET_ID = "1QaR920L5bZUGNLk02M-lgXr9c5_nHJQVoPgPL7UVVY4"
 ADMIN_IDS = ["665932047", "473541446", "5181691179"]  # Telegram ID админа
 MINI_ADMIN_IDS = ["914265474", "1285622060", "632325004",]  # ← здесь реальные Telegram ID
